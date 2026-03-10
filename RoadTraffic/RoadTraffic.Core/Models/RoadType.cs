@@ -1,4 +1,4 @@
-namespace MSFSTraffic.Models
+namespace RoadTraffic.Core.Models
 {
     public enum RoadType
     {
@@ -15,8 +15,9 @@ namespace MSFSTraffic.Models
 
     public enum VehicleLOD
     {
-        None,   // mimo dosah — despawn
-        Full    // plny detail
+        None,
+        Light,
+        Full
     }
 
     public enum TravelDirection
