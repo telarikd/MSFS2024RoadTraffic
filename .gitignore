@@ -1,0 +1,41 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build folders
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+
+# Visual Studio cache
+*.db
+*.opendb
+*.cache
+*.VC.db
+*.VC.opendb
+
+# Logs
+*.log
+
+# Rider / VSCode
+.idea/
+.vscode/
+
+# NuGet
+packages/
+
+# Copilot / indexes
+CopilotIndices/
+
+# OS
+.DS_Store
+Thumbs.db
+
+build_output*.txt
+.claude/

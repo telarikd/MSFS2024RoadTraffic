@@ -1,0 +1,9 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="RoadTraffic/RoadTraffic.csproj" Id="f6a4869c-6c5a-4295-9d21-866eff9362e4">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+</Solution>
