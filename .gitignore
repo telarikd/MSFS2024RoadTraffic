@@ -39,3 +39,7 @@ Thumbs.db
 
 build_output*.txt
 .claude/
+/.dotnet/10.0.103.toolpath.sentinel
+/.dotnet/.workloadAdvertisingManifestSentinel10.0.100
+/.dotnet/10.0.103.aspNetCertificateSentinel
+/.dotnet/10.0.103.dotnetFirstUseSentinel
