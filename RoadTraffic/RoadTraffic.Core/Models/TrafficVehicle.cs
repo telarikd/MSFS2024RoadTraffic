@@ -47,7 +47,13 @@ namespace RoadTraffic.Core.Models
 
         public VehicleLifecycleState LifecycleState { get; private set; }
 
+        public TrafficVisualTier VisualTier { get; private set; } = TrafficVisualTier.None;
+
+        public TrafficVisualTier PreviousVisualTier { get; private set; } = TrafficVisualTier.None;
+
         public bool HasLODChanged => CurrentLOD != PreviousLOD;
+
+        public bool HasVisualTierChanged => VisualTier != PreviousVisualTier;
 
         public void MarkPending()
         {
@@ -69,6 +75,27 @@ namespace RoadTraffic.Core.Models
         public void MarkDespawning()
         {
             LifecycleState = VehicleLifecycleState.Despawning;
+        }
+
+        public void UpdateVisualTier(double distance, double fullEnterRadius, double fullExitRadius, double lightRadius)
+        {
+            PreviousVisualTier = VisualTier;
+
+            switch (VisualTier)
+            {
+                case TrafficVisualTier.Full3D:
+                    VisualTier = distance <= fullExitRadius ? TrafficVisualTier.Full3D :
+                        distance <= lightRadius ? TrafficVisualTier.LightPoint : TrafficVisualTier.None;
+                    break;
+                case TrafficVisualTier.LightPoint:
+                    VisualTier = distance <= fullEnterRadius ? TrafficVisualTier.Full3D :
+                        distance <= lightRadius ? TrafficVisualTier.LightPoint : TrafficVisualTier.None;
+                    break;
+                default:
+                    VisualTier = distance <= fullEnterRadius ? TrafficVisualTier.Full3D :
+                        distance <= lightRadius ? TrafficVisualTier.LightPoint : TrafficVisualTier.None;
+                    break;
+            }
         }
 
         public bool UpdatePosition(double deltaTime)

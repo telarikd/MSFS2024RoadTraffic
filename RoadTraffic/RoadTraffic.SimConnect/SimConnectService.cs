@@ -132,6 +132,8 @@ namespace RoadTraffic.SimConnect
             _simConnect.AddToDataDefinition(Definitions.PlayerPosition, "PLANE LATITUDE", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, MsfsSimConnect.SIMCONNECT_UNUSED);
             _simConnect.AddToDataDefinition(Definitions.PlayerPosition, "PLANE LONGITUDE", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, MsfsSimConnect.SIMCONNECT_UNUSED);
             _simConnect.AddToDataDefinition(Definitions.PlayerPosition, "PLANE ALTITUDE", "feet", SIMCONNECT_DATATYPE.FLOAT64, 0, MsfsSimConnect.SIMCONNECT_UNUSED);
+            _simConnect.AddToDataDefinition(Definitions.PlayerPosition, "PLANE HEADING DEGREES TRUE", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, MsfsSimConnect.SIMCONNECT_UNUSED);
+            _simConnect.AddToDataDefinition(Definitions.PlayerPosition, "GROUND VELOCITY", "meters per second", SIMCONNECT_DATATYPE.FLOAT64, 0, MsfsSimConnect.SIMCONNECT_UNUSED);
             _simConnect.RegisterDataDefineStruct<PlayerPositionData>(Definitions.PlayerPosition);
         }
 
@@ -169,7 +171,12 @@ namespace RoadTraffic.SimConnect
             }
 
             var position = (PlayerPositionData)data.dwData[0];
-            PlayerPositionReceived?.Invoke(new PlayerPosition(position.Latitude, position.Longitude, position.Altitude));
+            PlayerPositionReceived?.Invoke(new PlayerPosition(
+                position.Latitude,
+                position.Longitude,
+                position.Altitude,
+                position.HeadingDeg,
+                position.GroundSpeedMs));
         }
 
         private void OnRecvAssignedObjectId(MsfsSimConnect sender, SIMCONNECT_RECV_ASSIGNED_OBJECT_ID data)
@@ -201,6 +208,8 @@ namespace RoadTraffic.SimConnect
             public double Latitude;
             public double Longitude;
             public double Altitude;
+            public double HeadingDeg;
+            public double GroundSpeedMs;
         }
     }
 }

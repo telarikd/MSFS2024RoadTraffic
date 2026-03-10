@@ -22,6 +22,8 @@ namespace RoadTraffic.Core
         private bool _isConnected;
         private bool _playerPositionReceived;
         private GeoCoordinate _playerPosition;
+        private double _playerHeadingDeg;
+        private double _playerGroundSpeedMs;
         private DateTime _lastPlayerPositionRequestUtc = DateTime.MinValue;
         private TrafficVehicle _spawningVehicle;
         private DateTime _lastSpawnUtc = DateTime.MinValue;
@@ -97,7 +99,7 @@ namespace RoadTraffic.Core
                         if (_playerPositionReceived)
                         {
                             await _trafficManager.RefreshRoadsAsync(_playerPosition);
-                            _trafficManager.Update(_playerPosition, UpdateIntervalMs / 1000.0);
+                            _trafficManager.Update(_playerPosition, UpdateIntervalMs / 1000.0, _playerHeadingDeg, _playerGroundSpeedMs);
                             DispatchNextSpawn();
                         }
                     }
@@ -167,6 +169,8 @@ namespace RoadTraffic.Core
         private void OnPlayerPositionReceived(PlayerPosition position)
         {
             _playerPosition = position.ToGeoCoordinate();
+            _playerHeadingDeg = position.HeadingDeg;
+            _playerGroundSpeedMs = position.GroundSpeedMs;
             _playerPositionReceived = true;
         }
 
@@ -187,11 +191,8 @@ namespace RoadTraffic.Core
             if (!isConnected)
             {
                 _playerPositionReceived = false;
-                if (_spawningVehicle != null && !_spawningVehicle.IsSpawned)
-                {
-                    _spawningVehicle.MarkPending();
-                    _spawningVehicle = null;
-                }
+                _spawningVehicle = null;
+                _trafficManager.RemoveAllVehicles();
             }
 
             PublishSnapshot();
@@ -212,6 +213,21 @@ namespace RoadTraffic.Core
 
         private void OnVehiclePositionUpdated(TrafficVehicle vehicle)
         {
+            if (vehicle.HasVisualTierChanged)
+            {
+                if (vehicle.VisualTier != TrafficVisualTier.Full3D && vehicle.IsSpawned && vehicle.SimObjectId != 0)
+                {
+                    _simConnectService.RemoveObject(vehicle.SimObjectId);
+                    vehicle.MarkPending();
+                    return;
+                }
+
+                if (vehicle.VisualTier == TrafficVisualTier.Full3D && !vehicle.IsSpawned && vehicle.LifecycleState == VehicleLifecycleState.PendingSpawn)
+                {
+                    _logger.Info($"Vehicle {vehicle.VehicleId} entered Full3D tier and is ready for spawn scheduling");
+                }
+            }
+
             if (!vehicle.IsSpawned || vehicle.SimObjectId == 0)
             {
                 return;
@@ -246,4 +262,3 @@ namespace RoadTraffic.Core
         }
     }
 }
-

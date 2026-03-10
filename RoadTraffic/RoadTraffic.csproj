@@ -55,6 +55,7 @@
     <Compile Include="RoadTraffic.Core\Models\TrafficDensityCalculator.cs" />
     <Compile Include="RoadTraffic.Core\Models\TrafficProfile.cs" />
     <Compile Include="RoadTraffic.Core\Models\TrafficVehicle.cs" />
+    <Compile Include="RoadTraffic.Core\Models\TrafficVisualTier.cs" />
     <Compile Include="RoadTraffic.Infrastructure\Logging\ILogger.cs" />
     <Compile Include="RoadTraffic.Infrastructure\Logging\SimpleFileLogger.cs" />
     <Compile Include="RoadTraffic.Infrastructure\OverpassRoadProvider.cs" />

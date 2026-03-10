@@ -44,6 +44,12 @@ namespace RoadTraffic.Core
 
         public double RoadFetchRadiusM { get; set; } = 6000;
         public double RoadRefetchThresholdM { get; set; } = 2000;
+        public double ForwardPredictionSeconds { get; set; } = 20.0;
+        public double SpawnRadiusM { get; set; } = 6000.0;
+        public double DespawnRadiusM { get; set; } = 7500.0;
+        public double FullVisualEnterRadiusM { get; set; } = 3800.0;
+        public double FullVisualExitRadiusM { get; set; } = 4200.0;
+        public double LightVisualRadiusM { get; set; } = 10000.0;
         public int MaxVehicles { get; set; } = 50;
         public string VehicleTitle { get; set; } = "HAmphibiusFemale";
         public double SimTimeHours { get; set; } = 12.0;
@@ -85,21 +91,28 @@ namespace RoadTraffic.Core
             _roadProvider.ClearDistantTiles(playerPos);
         }
 
-        public void Update(GeoCoordinate playerPos, double deltaTime)
+        public void Update(GeoCoordinate playerPos, double deltaTime, double playerHeadingDeg, double playerGroundSpeedMs)
         {
             UpdateVehicles(playerPos, deltaTime);
             TrimVehiclesToMaxCount();
-            SpawnVehiclesOnRoads(playerPos);
+            SpawnVehiclesOnRoads(playerPos, playerHeadingDeg, playerGroundSpeedMs);
         }
 
         public TrafficVehicle GetNextPendingSpawn()
         {
-            return _vehicles.FirstOrDefault(vehicle => vehicle.LifecycleState == VehicleLifecycleState.PendingSpawn);
+            return _vehicles.FirstOrDefault(vehicle =>
+                vehicle.LifecycleState == VehicleLifecycleState.PendingSpawn &&
+                vehicle.VisualTier == TrafficVisualTier.Full3D);
         }
 
         public void RegisterVehicleSpawn(TrafficVehicle vehicle, uint simObjectId)
         {
-            if (vehicle == null)
+            if (vehicle == null || !_vehicles.Contains(vehicle))
+            {
+                return;
+            }
+
+            if (vehicle.LifecycleState != VehicleLifecycleState.Spawning)
             {
                 return;
             }
@@ -150,11 +163,19 @@ namespace RoadTraffic.Core
 
                 var current = vehicle.GetCurrentPosition();
                 double distance = playerPos.DistanceTo(current.pos);
-                var newLod = vehicle.DetermineLOD(distance);
-                if (newLod == VehicleLOD.None)
+                vehicle.UpdateVisualTier(distance, FullVisualEnterRadiusM, FullVisualExitRadiusM, LightVisualRadiusM);
+
+                if (distance > DespawnRadiusM)
                 {
                     toRemove.Add(vehicle);
                     continue;
+                }
+
+                var newLod = vehicle.DetermineLOD(distance);
+
+                if (vehicle.HasVisualTierChanged)
+                {
+                    VehiclePositionUpdated?.Invoke(vehicle);
                 }
 
                 if (!vehicle.IsSpawned)
@@ -189,7 +210,7 @@ namespace RoadTraffic.Core
             }
         }
 
-        private void SpawnVehiclesOnRoads(GeoCoordinate playerPos)
+        private void SpawnVehiclesOnRoads(GeoCoordinate playerPos, double playerHeadingDeg, double playerGroundSpeedMs)
         {
             if (_activeRoads.Count == 0 || ActiveVehicleCount >= MaxVehicles)
             {
@@ -204,10 +225,10 @@ namespace RoadTraffic.Core
                     continue;
                 }
 
-                double distance = road.DistanceToPoint(playerPos);
-                bool isHighway = road.RoadType == RoadType.Motorway || road.RoadType == RoadType.Trunk;
-                if (distance <= (isHighway ? 15000 : 5000))
+                GeoCoordinate candidatePos = GetCandidatePosition(road);
+                if (IsWithinForwardBiasedSpawnArea(playerPos, playerHeadingDeg, playerGroundSpeedMs, candidatePos))
                 {
+                    double distance = playerPos.DistanceTo(candidatePos);
                     candidates.Add(new KeyValuePair<double, RoadSegment>(distance, road));
                 }
             }
@@ -238,12 +259,12 @@ namespace RoadTraffic.Core
                 int toSpawn = idealCount - currentCount;
                 for (int i = 0; i < toSpawn && ActiveVehicleCount < MaxVehicles; i++)
                 {
-                    SpawnVehicleOnRoad(road, playerPos);
+                    SpawnVehicleOnRoad(road, playerPos, playerHeadingDeg, playerGroundSpeedMs);
                 }
             }
         }
 
-        private void SpawnVehicleOnRoad(RoadSegment road, GeoCoordinate playerPos)
+        private void SpawnVehicleOnRoad(RoadSegment road, GeoCoordinate playerPos, double playerHeadingDeg, double playerGroundSpeedMs)
         {
             double distOnSegment = _rng.NextDouble() * road.LengthMeters;
             TravelDirection direction = road.IsOneWay || _rng.NextDouble() > 0.5 ? TravelDirection.Forward : TravelDirection.Reverse;
@@ -258,17 +279,12 @@ namespace RoadTraffic.Core
             };
 
             var current = vehicle.GetCurrentPosition();
-            double distance = playerPos.DistanceTo(current.pos);
-            if (distance < 50 || distance > GetMaxSpawnDistM(road.RoadType))
+            if (!IsWithinForwardBiasedSpawnArea(playerPos, playerHeadingDeg, playerGroundSpeedMs, current.pos))
             {
                 return;
             }
 
-            bool isHighway = road.RoadType == RoadType.Motorway || road.RoadType == RoadType.Trunk;
-            if (distance > 5000 && !isHighway)
-            {
-                return;
-            }
+            vehicle.UpdateVisualTier(playerPos.DistanceTo(current.pos), FullVisualEnterRadiusM, FullVisualExitRadiusM, LightVisualRadiusM);
 
             foreach (var existing in _vehicles)
             {
@@ -287,18 +303,43 @@ namespace RoadTraffic.Core
             _vehicles.Add(vehicle);
         }
 
-        private static double GetMaxSpawnDistM(RoadType type)
+        private bool IsWithinForwardBiasedSpawnArea(GeoCoordinate playerPos, double playerHeadingDeg, double playerGroundSpeedMs, GeoCoordinate candidatePos)
         {
-            switch (type)
+            double distance = playerPos.DistanceTo(candidatePos);
+            double forwardBonus = playerGroundSpeedMs * ForwardPredictionSeconds;
+
+            if (distance > SpawnRadiusM + forwardBonus)
             {
-                case RoadType.Motorway:
-                case RoadType.Trunk:
-                    return 15000;
-                case RoadType.Primary:
-                    return 2500;
-                default:
-                    return 2000;
+                return false;
             }
+
+            double bearingToCandidate = playerPos.BearingTo(candidatePos);
+            double angleDiff = Math.Abs(NormalizeAngle(playerHeadingDeg - bearingToCandidate));
+
+            if (angleDiff < 90)
+            {
+                return distance <= SpawnRadiusM + forwardBonus;
+            }
+
+            return distance <= SpawnRadiusM;
+        }
+
+        private static double NormalizeAngle(double angle)
+        {
+            angle %= 360;
+            if (angle > 180) angle -= 360;
+            if (angle < -180) angle += 360;
+            return angle;
+        }
+
+        private static GeoCoordinate GetCandidatePosition(RoadSegment road)
+        {
+            if (road.Nodes.Count == 0)
+            {
+                return new GeoCoordinate(0, 0);
+            }
+
+            return road.Nodes[road.Nodes.Count / 2];
         }
 
         private static double GetLaneOffsetM(RoadType type)
@@ -398,4 +439,3 @@ namespace RoadTraffic.Core
         }
     }
 }
-
