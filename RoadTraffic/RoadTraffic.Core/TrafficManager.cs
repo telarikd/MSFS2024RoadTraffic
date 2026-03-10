@@ -39,7 +39,6 @@ namespace RoadTraffic.Core
             };
         }
 
-        public event Action<TrafficVehicle> VehicleSpawnRequested;
         public event Action<TrafficVehicle> VehicleDespawnRequested;
         public event Action<TrafficVehicle> VehiclePositionUpdated;
 
@@ -56,7 +55,7 @@ namespace RoadTraffic.Core
             set => _densityCalc.UserDensityMultiplier = value;
         }
 
-        public int ActiveVehicleCount => _vehicles.Count;
+        public int ActiveVehicleCount => _vehicles.Count(vehicle => vehicle.LifecycleState != VehicleLifecycleState.Despawning);
         public int ActiveRoadCount => _activeRoads.Count;
         public double TotalRoadKm => _activeRoads.Sum(road => road.LengthMeters) / 1000.0;
 
@@ -93,6 +92,11 @@ namespace RoadTraffic.Core
             SpawnVehiclesOnRoads(playerPos);
         }
 
+        public TrafficVehicle GetNextPendingSpawn()
+        {
+            return _vehicles.FirstOrDefault(vehicle => vehicle.LifecycleState == VehicleLifecycleState.PendingSpawn);
+        }
+
         public void RegisterVehicleSpawn(TrafficVehicle vehicle, uint simObjectId)
         {
             if (vehicle == null)
@@ -100,14 +104,14 @@ namespace RoadTraffic.Core
                 return;
             }
 
-            vehicle.SimObjectId = simObjectId;
-            vehicle.IsSpawned = true;
+            vehicle.MarkSpawned(simObjectId);
         }
 
         public void RemoveAllVehicles()
         {
             foreach (var vehicle in _vehicles.ToList())
             {
+                vehicle.MarkDespawning();
                 VehicleDespawnRequested?.Invoke(vehicle);
             }
 
@@ -126,6 +130,12 @@ namespace RoadTraffic.Core
 
             foreach (var vehicle in _vehicles)
             {
+                if (vehicle.LifecycleState == VehicleLifecycleState.Despawning)
+                {
+                    toRemove.Add(vehicle);
+                    continue;
+                }
+
                 if (!_enabledRoadTypes.Contains(vehicle.Segment.RoadType))
                 {
                     toRemove.Add(vehicle);
@@ -147,6 +157,11 @@ namespace RoadTraffic.Core
                     continue;
                 }
 
+                if (!vehicle.IsSpawned)
+                {
+                    continue;
+                }
+
                 if (newLod == VehicleLOD.Light && (_tickCount % 30) != 0)
                 {
                     continue;
@@ -157,6 +172,7 @@ namespace RoadTraffic.Core
 
             foreach (var vehicle in toRemove)
             {
+                vehicle.MarkDespawning();
                 _vehicles.Remove(vehicle);
                 VehicleDespawnRequested?.Invoke(vehicle);
             }
@@ -164,9 +180,10 @@ namespace RoadTraffic.Core
 
         private void TrimVehiclesToMaxCount()
         {
-            while (_vehicles.Count > MaxVehicles)
+            while (ActiveVehicleCount > MaxVehicles)
             {
                 var vehicle = _vehicles[_vehicles.Count - 1];
+                vehicle.MarkDespawning();
                 _vehicles.RemoveAt(_vehicles.Count - 1);
                 VehicleDespawnRequested?.Invoke(vehicle);
             }
@@ -174,7 +191,7 @@ namespace RoadTraffic.Core
 
         private void SpawnVehiclesOnRoads(GeoCoordinate playerPos)
         {
-            if (_activeRoads.Count == 0 || _vehicles.Count >= MaxVehicles)
+            if (_activeRoads.Count == 0 || ActiveVehicleCount >= MaxVehicles)
             {
                 return;
             }
@@ -199,7 +216,7 @@ namespace RoadTraffic.Core
 
             foreach (var candidate in candidates)
             {
-                if (_vehicles.Count >= MaxVehicles)
+                if (ActiveVehicleCount >= MaxVehicles)
                 {
                     break;
                 }
@@ -217,9 +234,9 @@ namespace RoadTraffic.Core
                     continue;
                 }
 
-                int currentCount = _vehicles.Count(vehicle => vehicle.Segment.OsmId == road.OsmId);
+                int currentCount = _vehicles.Count(vehicle => vehicle.Segment.OsmId == road.OsmId && vehicle.LifecycleState != VehicleLifecycleState.Despawning);
                 int toSpawn = idealCount - currentCount;
-                for (int i = 0; i < toSpawn && _vehicles.Count < MaxVehicles; i++)
+                for (int i = 0; i < toSpawn && ActiveVehicleCount < MaxVehicles; i++)
                 {
                     SpawnVehicleOnRoad(road, playerPos);
                 }
@@ -255,7 +272,7 @@ namespace RoadTraffic.Core
 
             foreach (var existing in _vehicles)
             {
-                if (existing.Segment.OsmId != road.OsmId)
+                if (existing.Segment.OsmId != road.OsmId || existing.LifecycleState == VehicleLifecycleState.Despawning)
                 {
                     continue;
                 }
@@ -266,8 +283,8 @@ namespace RoadTraffic.Core
                 }
             }
 
+            vehicle.MarkPending();
             _vehicles.Add(vehicle);
-            VehicleSpawnRequested?.Invoke(vehicle);
         }
 
         private static double GetMaxSpawnDistM(RoadType type)
@@ -381,3 +398,4 @@ namespace RoadTraffic.Core
         }
     }
 }
+

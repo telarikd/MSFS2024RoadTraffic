@@ -3,7 +3,6 @@ using RoadTraffic.Core.Models;
 using RoadTraffic.Infrastructure.Logging;
 using RoadTraffic.SimConnect;
 using System;
-using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,8 +13,8 @@ namespace RoadTraffic.Core
         private readonly ISimConnectService _simConnectService;
         private readonly TrafficManager _trafficManager;
         private readonly IntPtr _windowHandle;
-        private readonly ConcurrentQueue<TrafficVehicle> _pendingSpawnQueue;
         private readonly ILogger _logger;
+        private readonly TimeSpan _minSpawnInterval = TimeSpan.FromMilliseconds(200);
 
         private CancellationTokenSource _loopCts;
         private Task _loopTask;
@@ -24,8 +23,8 @@ namespace RoadTraffic.Core
         private bool _playerPositionReceived;
         private GeoCoordinate _playerPosition;
         private DateTime _lastPlayerPositionRequestUtc = DateTime.MinValue;
-        private TrafficVehicle _spawnInFlight;
-        private DateTime _spawnRequestedAtUtc = DateTime.MinValue;
+        private TrafficVehicle _spawningVehicle;
+        private DateTime _lastSpawnUtc = DateTime.MinValue;
 
         public TrafficSession(ISimConnectService simConnectService, TrafficManager trafficManager, IntPtr windowHandle, ILogger logger)
         {
@@ -33,9 +32,7 @@ namespace RoadTraffic.Core
             _trafficManager = trafficManager;
             _windowHandle = windowHandle;
             _logger = logger;
-            _pendingSpawnQueue = new ConcurrentQueue<TrafficVehicle>();
 
-            _trafficManager.VehicleSpawnRequested += OnVehicleSpawnRequested;
             _trafficManager.VehicleDespawnRequested += OnVehicleDespawnRequested;
             _trafficManager.VehiclePositionUpdated += OnVehiclePositionUpdated;
         }
@@ -78,8 +75,7 @@ namespace RoadTraffic.Core
             _simConnectService.Disconnect();
             _playerPositionReceived = false;
             _isConnected = false;
-            _spawnInFlight = null;
-            while (_pendingSpawnQueue.TryDequeue(out _)) { }
+            _spawningVehicle = null;
             PublishSnapshot();
             _logger.Info("Traffic session stopped");
         }
@@ -102,7 +98,7 @@ namespace RoadTraffic.Core
                         {
                             await _trafficManager.RefreshRoadsAsync(_playerPosition);
                             _trafficManager.Update(_playerPosition, UpdateIntervalMs / 1000.0);
-                            DispatchQueuedSpawn();
+                            DispatchNextSpawn();
                         }
                     }
 
@@ -119,28 +115,36 @@ namespace RoadTraffic.Core
             }
         }
 
-        private void DispatchQueuedSpawn()
+        private void DispatchNextSpawn()
         {
             if (!_isConnected)
             {
                 return;
             }
 
-            if (_spawnInFlight != null)
-            {
-                if (DateTime.UtcNow - _spawnRequestedAtUtc < TimeSpan.FromSeconds(3))
-                {
-                    return;
-                }
-
-                _logger.Warn("Spawn request timed out; clearing in-flight vehicle");
-                _spawnInFlight = null;
-            }
-
-            if (!_pendingSpawnQueue.TryDequeue(out TrafficVehicle vehicle))
+            if (_spawningVehicle != null)
             {
                 return;
             }
+
+            if (_trafficManager.ActiveVehicleCount >= _trafficManager.MaxVehicles)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow - _lastSpawnUtc < _minSpawnInterval)
+            {
+                return;
+            }
+
+            TrafficVehicle vehicle = _trafficManager.GetNextPendingSpawn();
+            if (vehicle == null)
+            {
+                return;
+            }
+
+            vehicle.MarkSpawning();
+            _spawningVehicle = vehicle;
 
             var current = vehicle.GetCurrentPosition();
             var initPosition = new SIMCONNECT_DATA_INITPOSITION
@@ -155,9 +159,8 @@ namespace RoadTraffic.Core
                 Airspeed = 0
             };
 
-            _spawnInFlight = vehicle;
-            _spawnRequestedAtUtc = DateTime.UtcNow;
             _simConnectService.SpawnObject(vehicle.SimObjectTitle, initPosition);
+            _lastSpawnUtc = DateTime.UtcNow;
             _logger.Info($"Spawn cycle executed for vehicle {vehicle.VehicleId}");
         }
 
@@ -169,13 +172,13 @@ namespace RoadTraffic.Core
 
         private void OnObjectSpawned(uint objectId)
         {
-            if (_spawnInFlight == null)
+            if (_spawningVehicle == null)
             {
                 return;
             }
 
-            _trafficManager.RegisterVehicleSpawn(_spawnInFlight, objectId);
-            _spawnInFlight = null;
+            _trafficManager.RegisterVehicleSpawn(_spawningVehicle, objectId);
+            _spawningVehicle = null;
         }
 
         private void OnConnectionStateChanged(bool isConnected)
@@ -184,20 +187,23 @@ namespace RoadTraffic.Core
             if (!isConnected)
             {
                 _playerPositionReceived = false;
-                _spawnInFlight = null;
-                while (_pendingSpawnQueue.TryDequeue(out _)) { }
+                if (_spawningVehicle != null && !_spawningVehicle.IsSpawned)
+                {
+                    _spawningVehicle.MarkPending();
+                    _spawningVehicle = null;
+                }
             }
 
             PublishSnapshot();
         }
 
-        private void OnVehicleSpawnRequested(TrafficVehicle vehicle)
-        {
-            _pendingSpawnQueue.Enqueue(vehicle);
-        }
-
         private void OnVehicleDespawnRequested(TrafficVehicle vehicle)
         {
+            if (ReferenceEquals(vehicle, _spawningVehicle))
+            {
+                _spawningVehicle = null;
+            }
+
             if (vehicle.IsSpawned && vehicle.SimObjectId != 0)
             {
                 _simConnectService.RemoveObject(vehicle.SimObjectId);
@@ -240,3 +246,4 @@ namespace RoadTraffic.Core
         }
     }
 }
+

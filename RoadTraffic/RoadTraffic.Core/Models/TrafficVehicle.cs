@@ -2,6 +2,14 @@ using System;
 
 namespace RoadTraffic.Core.Models
 {
+    public enum VehicleLifecycleState
+    {
+        PendingSpawn,
+        Spawning,
+        Spawned,
+        Despawning
+    }
+
     public class TrafficVehicle
     {
         private static int _nextId = 1;
@@ -16,13 +24,14 @@ namespace RoadTraffic.Core.Models
             SimObjectTitle = simObjectTitle;
             _distTraveled = Math.Max(0, Math.Min(distOnSegment, segment.LengthMeters));
             _speedMs = Math.Max(0, speedKmh / 3.6);
+            LifecycleState = VehicleLifecycleState.PendingSpawn;
         }
 
         public int VehicleId { get; }
 
-        public uint SimObjectId { get; set; }
+        public uint SimObjectId { get; private set; }
 
-        public bool IsSpawned { get; set; }
+        public bool IsSpawned => LifecycleState == VehicleLifecycleState.Spawned;
 
         public string SimObjectTitle { get; }
 
@@ -36,7 +45,31 @@ namespace RoadTraffic.Core.Models
 
         public VehicleLOD PreviousLOD { get; private set; } = VehicleLOD.Full;
 
+        public VehicleLifecycleState LifecycleState { get; private set; }
+
         public bool HasLODChanged => CurrentLOD != PreviousLOD;
+
+        public void MarkPending()
+        {
+            SimObjectId = 0;
+            LifecycleState = VehicleLifecycleState.PendingSpawn;
+        }
+
+        public void MarkSpawning()
+        {
+            LifecycleState = VehicleLifecycleState.Spawning;
+        }
+
+        public void MarkSpawned(uint simObjectId)
+        {
+            SimObjectId = simObjectId;
+            LifecycleState = VehicleLifecycleState.Spawned;
+        }
+
+        public void MarkDespawning()
+        {
+            LifecycleState = VehicleLifecycleState.Despawning;
+        }
 
         public bool UpdatePosition(double deltaTime)
         {
