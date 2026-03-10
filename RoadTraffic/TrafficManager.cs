@@ -17,6 +17,7 @@ namespace MSFSTraffic.Engine
         private readonly OverpassRoadProvider _roadProvider;
         private readonly TrafficDensityCalculator _densityCalc;
         private readonly Random _rng;
+        private readonly FarTrafficManager _farTraffic;
 
         // ── Stav ──
         private List<RoadSegment> _activeRoads;
@@ -85,6 +86,7 @@ namespace MSFSTraffic.Engine
             _roadProvider = new OverpassRoadProvider();
             _densityCalc = new TrafficDensityCalculator();
             _rng = new Random();
+            _farTraffic = new FarTrafficManager();
             _vehicles = new List<TrafficVehicle>();
             _activeRoads = new List<RoadSegment>();
             _lastRoadFetchPosition = new GeoCoordinate(0, 0);
@@ -121,6 +123,9 @@ namespace MSFSTraffic.Engine
 
         /// <summary>Počet aktivních vozidel.</summary>
         public int ActiveVehicleCount => _vehicles.Count;
+
+        /// <summary>Počet aktivních far-traffic světel (5–15 km vrstva).</summary>
+        public int FarLightCount => _farTraffic.LightCount;
 
         /// <summary>Počet načtených silničních segmentů.</summary>
         public int ActiveRoadCount => _activeRoads?.Count ?? 0;
@@ -195,6 +200,7 @@ namespace MSFSTraffic.Engine
 
             UpdateVehicles(playerPos, deltaTime);
             SpawnVehiclesOnRoads(playerPos);
+            _farTraffic.Update(_activeRoads, playerPos, deltaTime);
         }
 
         // ════════════════════════════════════════
@@ -559,7 +565,17 @@ namespace MSFSTraffic.Engine
                 OnVehicleDespawnRequested?.Invoke(vehicle);
             }
             _vehicles.Clear();
+            _farTraffic.Clear();
             Console.WriteLine("[TrafficManager] All vehicles removed.");
+        }
+
+        /// <summary>
+        /// Vrací pozice všech far-traffic světel pro vykreslení UI vrstvou.
+        /// isForward=true → bílá (přijíždějící); isForward=false → červená (zadní světla).
+        /// </summary>
+        public List<(GeoCoordinate pos, bool isForward)> GetFarLightPositions()
+        {
+            return _farTraffic.GetLightPositions();
         }
 
         /// <summary>

@@ -481,6 +481,30 @@ namespace RoadTraffic
         }
 
         // ════════════════════════════════════════
+        //  ROAD TYPE CHECKBOXES
+        // ════════════════════════════════════════
+
+        private void OnRoadTypeCheckboxChanged(object sender, RoutedEventArgs e)
+        {
+            var chk = sender as CheckBox;
+            if (chk == null || _trafficManager == null) return;
+
+            bool enabled = chk.IsChecked == true;
+
+            RoadType type;
+            if      (chk == ChkMotorway)     type = RoadType.Motorway;
+            else if (chk == ChkTrunk)        type = RoadType.Trunk;
+            else if (chk == ChkPrimary)      type = RoadType.Primary;
+            else if (chk == ChkSecondary)    type = RoadType.Secondary;
+            else if (chk == ChkTertiary)     type = RoadType.Tertiary;
+            else if (chk == ChkResidential)  type = RoadType.Residential;
+            else if (chk == ChkUnclassified) type = RoadType.Unclassified;
+            else return;
+
+            _trafficManager.SetRoadTypeEnabled(type, enabled);
+        }
+
+        // ════════════════════════════════════════
         //  TICKRATE DROPDOWN
         // ════════════════════════════════════════
 

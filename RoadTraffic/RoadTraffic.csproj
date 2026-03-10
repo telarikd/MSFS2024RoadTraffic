@@ -89,6 +89,8 @@
   <ItemGroup>
     <!-- Model classes — jen root verze (Models\ slozka obsahuje stare kopie) -->
     <Compile Include="BoundingBox.cs" />
+    <Compile Include="FarTrafficLight.cs" />
+    <Compile Include="FarTrafficManager.cs" />
     <Compile Include="GeoCoordinate.cs" />
     <Compile Include="OverpassRoadProvider.cs" />
     <Compile Include="Program.cs" />
