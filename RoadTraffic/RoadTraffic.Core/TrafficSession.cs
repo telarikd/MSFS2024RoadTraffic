@@ -1,5 +1,6 @@
 using Microsoft.FlightSimulator.SimConnect;
 using RoadTraffic.Core.Models;
+using RoadTraffic.Infrastructure.Logging;
 using RoadTraffic.SimConnect;
 using System;
 using System.Collections.Concurrent;
@@ -14,6 +15,7 @@ namespace RoadTraffic.Core
         private readonly TrafficManager _trafficManager;
         private readonly IntPtr _windowHandle;
         private readonly ConcurrentQueue<TrafficVehicle> _pendingSpawnQueue;
+        private readonly ILogger _logger;
 
         private CancellationTokenSource _loopCts;
         private Task _loopTask;
@@ -25,11 +27,12 @@ namespace RoadTraffic.Core
         private TrafficVehicle _spawnInFlight;
         private DateTime _spawnRequestedAtUtc = DateTime.MinValue;
 
-        public TrafficSession(ISimConnectService simConnectService, TrafficManager trafficManager, IntPtr windowHandle)
+        public TrafficSession(ISimConnectService simConnectService, TrafficManager trafficManager, IntPtr windowHandle, ILogger logger)
         {
             _simConnectService = simConnectService;
             _trafficManager = trafficManager;
             _windowHandle = windowHandle;
+            _logger = logger;
             _pendingSpawnQueue = new ConcurrentQueue<TrafficVehicle>();
 
             _trafficManager.VehicleSpawnRequested += OnVehicleSpawnRequested;
@@ -56,6 +59,7 @@ namespace RoadTraffic.Core
 
             _loopCts = new CancellationTokenSource();
             _loopTask = RunLoop(_loopCts.Token);
+            _logger.Info("Traffic session started");
         }
 
         public void Stop()
@@ -77,6 +81,7 @@ namespace RoadTraffic.Core
             _spawnInFlight = null;
             while (_pendingSpawnQueue.TryDequeue(out _)) { }
             PublishSnapshot();
+            _logger.Info("Traffic session stopped");
         }
 
         private async Task RunLoop(CancellationToken cancellationToken)
@@ -108,6 +113,10 @@ namespace RoadTraffic.Core
             catch (TaskCanceledException)
             {
             }
+            catch (Exception ex)
+            {
+                _logger.Error("Traffic session loop failed", ex);
+            }
         }
 
         private void DispatchQueuedSpawn()
@@ -124,6 +133,7 @@ namespace RoadTraffic.Core
                     return;
                 }
 
+                _logger.Warn("Spawn request timed out; clearing in-flight vehicle");
                 _spawnInFlight = null;
             }
 
@@ -148,6 +158,7 @@ namespace RoadTraffic.Core
             _spawnInFlight = vehicle;
             _spawnRequestedAtUtc = DateTime.UtcNow;
             _simConnectService.SpawnObject(vehicle.SimObjectTitle, initPosition);
+            _logger.Info($"Spawn cycle executed for vehicle {vehicle.VehicleId}");
         }
 
         private void OnPlayerPositionReceived(PlayerPosition position)

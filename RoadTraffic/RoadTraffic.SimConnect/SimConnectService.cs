@@ -1,6 +1,7 @@
 using Microsoft.FlightSimulator.SimConnect;
 using MsfsSimConnect = Microsoft.FlightSimulator.SimConnect.SimConnect;
 using RoadTraffic.Core.Models;
+using RoadTraffic.Infrastructure.Logging;
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -11,6 +12,7 @@ namespace RoadTraffic.SimConnect
     public class SimConnectService : ISimConnectService
     {
         private const int WM_USER_SIMCONNECT = 0x0402;
+        private readonly ILogger _logger;
         private MsfsSimConnect _simConnect;
         private CancellationTokenSource _receiveLoopCts;
         private Task _receiveLoopTask;
@@ -25,6 +27,11 @@ namespace RoadTraffic.SimConnect
         {
             InitPosition = 1,
             PlayerPosition = 2
+        }
+
+        public SimConnectService(ILogger logger)
+        {
+            _logger = logger;
         }
 
         public event Action<PlayerPosition> PlayerPositionReceived;
@@ -45,12 +52,15 @@ namespace RoadTraffic.SimConnect
                 _simConnect.OnRecvOpen += OnRecvOpen;
                 _simConnect.OnRecvSimobjectData += OnRecvSimobjectData;
                 _simConnect.OnRecvAssignedObjectId += OnRecvAssignedObjectId;
+                _simConnect.OnRecvException += OnRecvException;
                 _simConnect.OnRecvQuit += OnRecvQuit;
                 _receiveLoopCts = new CancellationTokenSource();
                 _receiveLoopTask = ReceiveMessagesAsync(_receiveLoopCts.Token);
+                _logger.Info("SimConnect receive loop started");
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.Error("Failed to connect SimConnect", ex);
                 Disconnect();
                 ConnectionStateChanged?.Invoke(false);
             }
@@ -66,9 +76,11 @@ namespace RoadTraffic.SimConnect
                 _simConnect.OnRecvOpen -= OnRecvOpen;
                 _simConnect.OnRecvSimobjectData -= OnRecvSimobjectData;
                 _simConnect.OnRecvAssignedObjectId -= OnRecvAssignedObjectId;
+                _simConnect.OnRecvException -= OnRecvException;
                 _simConnect.OnRecvQuit -= OnRecvQuit;
                 _simConnect.Dispose();
                 _simConnect = null;
+                _logger.Info("SimConnect disconnected");
             }
         }
 
@@ -136,14 +148,16 @@ namespace RoadTraffic.SimConnect
             catch (TaskCanceledException)
             {
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.Error("SimConnect receive loop failed", ex);
                 ConnectionStateChanged?.Invoke(false);
             }
         }
 
         private void OnRecvOpen(MsfsSimConnect sender, SIMCONNECT_RECV_OPEN data)
         {
+            _logger.Info("SimConnect connected");
             ConnectionStateChanged?.Invoke(true);
         }
 
@@ -163,8 +177,20 @@ namespace RoadTraffic.SimConnect
             ObjectSpawned?.Invoke(data.dwObjectID);
         }
 
+        private void OnRecvException(MsfsSimConnect sender, SIMCONNECT_RECV_EXCEPTION data)
+        {
+            if ((SIMCONNECT_EXCEPTION)data.dwException == SIMCONNECT_EXCEPTION.CREATE_OBJECT_FAILED)
+            {
+                _logger.Warn("SimConnect object creation failed");
+                return;
+            }
+
+            _logger.Warn($"SimConnect exception received: {(SIMCONNECT_EXCEPTION)data.dwException}");
+        }
+
         private void OnRecvQuit(MsfsSimConnect sender, SIMCONNECT_RECV data)
         {
+            _logger.Warn("SimConnect quit received");
             ConnectionStateChanged?.Invoke(false);
             Disconnect();
         }
@@ -178,6 +204,3 @@ namespace RoadTraffic.SimConnect
         }
     }
 }
-
-
-

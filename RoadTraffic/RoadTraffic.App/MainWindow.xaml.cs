@@ -1,6 +1,7 @@
 using RoadTraffic.Core;
 using RoadTraffic.Core.Models;
 using RoadTraffic.Infrastructure;
+using RoadTraffic.Infrastructure.Logging;
 using RoadTraffic.SimConnect;
 using System;
 using System.Windows;
@@ -15,6 +16,7 @@ namespace RoadTraffic.App
     {
         private const string VehicleTitle = "HAmphibiusFemale";
 
+        private readonly ILogger _logger;
         private readonly TrafficManager _trafficManager;
         private readonly ISimConnectService _simConnectService;
         private TrafficSession _trafficSession;
@@ -25,13 +27,14 @@ namespace RoadTraffic.App
         {
             InitializeComponent();
 
-            _trafficManager = new TrafficManager(new OverpassRoadProvider())
+            _logger = new SimpleFileLogger();
+            _trafficManager = new TrafficManager(new OverpassRoadProvider(_logger))
             {
                 VehicleTitle = VehicleTitle,
                 MaxVehicles = 30,
                 UserDensityMultiplier = 0.5
             };
-            _simConnectService = new SimConnectService();
+            _simConnectService = new SimConnectService(_logger);
 
             DensitySlider.ValueChanged += OnDensitySliderChanged;
             DensityTextBox.LostFocus += OnDensityTextBoxLostFocus;
@@ -61,7 +64,7 @@ namespace RoadTraffic.App
         {
             base.OnSourceInitialized(e);
             var helper = new WindowInteropHelper(this);
-            _trafficSession = new TrafficSession(_simConnectService, _trafficManager, helper.Handle);
+            _trafficSession = new TrafficSession(_simConnectService, _trafficManager, helper.Handle, _logger);
             _trafficSession.SessionUpdated += OnSessionUpdated;
             _trafficSession.Start();
         }

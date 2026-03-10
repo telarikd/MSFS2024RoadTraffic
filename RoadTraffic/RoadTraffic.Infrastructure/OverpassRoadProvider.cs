@@ -1,5 +1,6 @@
 using RoadTraffic.Core;
 using RoadTraffic.Core.Models;
+using RoadTraffic.Infrastructure.Logging;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -20,9 +21,11 @@ namespace RoadTraffic.Infrastructure
         private readonly HttpClient _httpClient;
         private readonly Dictionary<string, List<RoadSegment>> _cache;
         private readonly double _tileSizeDeg;
+        private readonly ILogger _logger;
 
-        public OverpassRoadProvider(double tileSizeDeg = 0.05)
+        public OverpassRoadProvider(ILogger logger, double tileSizeDeg = 0.05)
         {
+            _logger = logger;
             _httpClient = new HttpClient();
             _httpClient.Timeout = TimeSpan.FromSeconds(8);
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "MSFSTrafficEngine/1.0");
@@ -57,8 +60,9 @@ namespace RoadTraffic.Infrastructure
                     _cache[tileKey] = segments;
                     result.AddRange(segments);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.Error($"Overpass tile fetch failed for {tileKey}", ex);
                     _cache[tileKey] = new List<RoadSegment>();
                 }
             }
@@ -103,13 +107,17 @@ namespace RoadTraffic.Infrastructure
             {
                 try
                 {
+                    _logger.Info($"Overpass request sent to {endpoint}");
                     var content = new StringContent(encodedQuery, System.Text.Encoding.UTF8, "application/x-www-form-urlencoded");
                     var response = await _httpClient.PostAsync(endpoint, content);
                     response.EnsureSuccessStatusCode();
-                    return ParseOverpassResponse(await response.Content.ReadAsStringAsync());
+                    string json = await response.Content.ReadAsStringAsync();
+                    _logger.Info($"Overpass response received from {endpoint}");
+                    return ParseOverpassResponse(json);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.Error($"Overpass request failed for {endpoint}", ex);
                 }
             }
 
@@ -159,8 +167,9 @@ namespace RoadTraffic.Infrastructure
                         segments.Add(segment);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.Error("Failed to parse Overpass way element", ex);
                 }
             }
 

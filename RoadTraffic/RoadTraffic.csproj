@@ -55,6 +55,8 @@
     <Compile Include="RoadTraffic.Core\Models\TrafficDensityCalculator.cs" />
     <Compile Include="RoadTraffic.Core\Models\TrafficProfile.cs" />
     <Compile Include="RoadTraffic.Core\Models\TrafficVehicle.cs" />
+    <Compile Include="RoadTraffic.Infrastructure\Logging\ILogger.cs" />
+    <Compile Include="RoadTraffic.Infrastructure\Logging\SimpleFileLogger.cs" />
     <Compile Include="RoadTraffic.Infrastructure\OverpassRoadProvider.cs" />
     <Compile Include="RoadTraffic.SimConnect\ISimConnectService.cs" />
     <Compile Include="RoadTraffic.SimConnect\SimConnectService.cs" />
@@ -67,7 +69,15 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-</Project>
+  <ItemGroup>
+    <Content Include="bin\x64\Debug\SimConnect.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <TargetPath>SimConnect.dll</TargetPath>
+    </Content>
+  </ItemGroup></Project>
+
+
+
 
 
 
