@@ -102,7 +102,9 @@
     </Compile>
     <Compile Include="RoadSegment.cs" />
     <Compile Include="RoadType.cs" />
+    <Compile Include="TrafficCar.cs" />
     <Compile Include="TrafficDensityCalculator.cs" />
+    <Compile Include="TrafficEngine.cs" />
     <Compile Include="TrafficManager.cs" />
     <Compile Include="TrafficProfile.cs" />
     <Compile Include="TrafficVehicle.cs" />

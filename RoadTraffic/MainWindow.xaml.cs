@@ -16,8 +16,9 @@ namespace RoadTraffic
     public partial class MainWindow : Window
     {
         // ── Konfigurace ──
-        private const int WM_USER_SIMCONNECT = 0x0402;
-        private const string VEHICLE_TITLE = "HAmphibiusFemale";
+        private const int    WM_USER_SIMCONNECT = 0x0402;
+        private const string VEHICLE_TITLE      = "HAmphibiusFemale";
+        private const string FLARE_EFFECT_TITLE = "RoadTrafficLight";     // SimObject\RoadTrafficLight package
         private int _updateIntervalMs = 16;            // ~60 Hz default; meni se pres ComboBox
         private const int PLAYER_POLL_INTERVAL_MS = 1000;
 
@@ -28,6 +29,10 @@ namespace RoadTraffic
 
         // ── Traffic Engine ──
         private TrafficManager _trafficManager;
+        private TrafficEngine  _trafficEngine;
+
+        // ── TrafficEngine spawn tracking ──
+        private readonly Dictionary<uint, TrafficCar> _pendingCarSpawns = new Dictionary<uint, TrafficCar>();
 
         // ── Hráčova pozice ──
         private GeoCoordinate _playerPos;
@@ -112,6 +117,15 @@ namespace RoadTraffic
             _respawnDebounceTimer = new DispatcherTimer();
             _respawnDebounceTimer.Interval = TimeSpan.FromMilliseconds(800);
             _respawnDebounceTimer.Tick += OnRespawnDebounce;
+
+            // TrafficEngine — pohyblivá světelná vrstva (FlareEffect SimObjects)
+            _trafficEngine = new TrafficEngine();
+            _trafficEngine.MaxCars = 150;
+            _trafficEngine.OnSpawnRequested    += OnCarSpawnRequested;
+            _trafficEngine.OnDespawnRequested  += OnCarDespawnRequested;
+            _trafficEngine.OnPositionUpdated   += OnCarPositionUpdated;
+
+            TrafficCarsSlider.ValueChanged += OnTrafficCarsSliderChanged;
         }
 
         // ════════════════════════════════════════
@@ -229,7 +243,7 @@ namespace RoadTraffic
 
         private void OnRecvAssignedObjectId(SimConnect sender, SIMCONNECT_RECV_ASSIGNED_OBJECT_ID e)
         {
-            uint requestId  = e.dwRequestID;
+            uint requestId   = e.dwRequestID;
             uint simObjectId = e.dwObjectID;
 
             if (_pendingSpawns.ContainsKey(requestId))
@@ -238,6 +252,12 @@ namespace RoadTraffic
                 _pendingSpawns.Remove(requestId);
                 _trafficManager.RegisterSimObjectId(vehicleId, simObjectId);
                 _simObjectToVehicle[simObjectId] = vehicleId;
+            }
+            else if (_pendingCarSpawns.ContainsKey(requestId))
+            {
+                TrafficCar car = _pendingCarSpawns[requestId];
+                _pendingCarSpawns.Remove(requestId);
+                _trafficEngine.ConfirmSpawn(requestId, simObjectId);
             }
         }
 
@@ -358,6 +378,7 @@ namespace RoadTraffic
             deltaTime = Math.Min(deltaTime, 0.5);
 
             _trafficManager.Update(_playerPos, deltaTime);
+            _trafficEngine.Update(_playerPos.Latitude, _playerPos.Longitude, deltaTime);
 
             // UI refresh jen ~1× za sekundu (ne kazdy physics tick)
             if (++_uiRefreshCounter >= 60)
@@ -368,7 +389,10 @@ namespace RoadTraffic
                 int roads    = _trafficManager.ActiveRoadCount;
                 double km    = _trafficManager.TotalRoadKm;
 
-                VehiclesText.Text = string.Format("Vehicles: {0}/{1}", vehicles, _trafficManager.MaxVehicles);
+                VehiclesText.Text = string.Format("Vehicles: {0}/{1}   Cars: {2}",
+                    vehicles, _trafficManager.MaxVehicles, _trafficEngine.ActiveCarCount);
+
+                FlareCountText.Text = string.Format("Rendered flares: {0}", _trafficEngine.ActiveCars);
 
                 if (roads > 0)
                 {
@@ -523,6 +547,82 @@ namespace RoadTraffic
         }
 
         // ════════════════════════════════════════
+        //  TRAFFIC CARS (FlareEffect)
+        // ════════════════════════════════════════
+
+        private void OnCarSpawnRequested(TrafficCar car)
+        {
+            if (_simConnect == null) return;
+            try
+            {
+                var initPos = new SIMCONNECT_DATA_INITPOSITION
+                {
+                    Latitude  = car.Lat,
+                    Longitude = car.Lon,
+                    Altitude  = 0,
+                    Pitch     = 0,
+                    Bank      = 0,
+                    Heading   = car.Heading,
+                    OnGround  = 1,
+                    Airspeed  = 0
+                };
+
+                uint requestId = _nextRequestId++;
+                car.RequestId  = requestId;
+                _pendingCarSpawns[requestId] = car;
+
+                _simConnect.AICreateSimulatedObject_EX1(FLARE_EFFECT_TITLE, "", initPos, (Requests)requestId);
+            }
+            catch { }
+        }
+
+        private void OnCarDespawnRequested(TrafficCar car)
+        {
+            if (_simConnect == null || car.ObjectId == 0 || !car.IsSpawned) return;
+            try
+            {
+                uint reqId = _nextRequestId++;
+                _simConnect.AIRemoveObject(car.ObjectId, (Requests)reqId);
+            }
+            catch { }
+        }
+
+        private void OnCarPositionUpdated(TrafficCar car)
+        {
+            if (_simConnect == null || car.ObjectId == 0 || !car.IsSpawned) return;
+            try
+            {
+                var simPos = new SIMCONNECT_DATA_INITPOSITION
+                {
+                    Latitude  = car.Lat,
+                    Longitude = car.Lon,
+                    Altitude  = 0,
+                    Pitch     = 0,
+                    Bank      = 0,
+                    Heading   = car.Heading,
+                    OnGround  = 1,
+                    Airspeed  = 0
+                };
+
+                _simConnect.SetDataOnSimObject(
+                    Definitions.InitPosition,
+                    car.ObjectId,
+                    SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                    simPos);
+            }
+            catch { }
+        }
+
+        private void OnTrafficCarsSliderChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            int val = (int)TrafficCarsSlider.Value;
+            if (TrafficCarsValueText != null)
+                TrafficCarsValueText.Text = val.ToString();
+            if (_trafficEngine != null)
+                _trafficEngine.MaxCars = val;
+        }
+
+        // ════════════════════════════════════════
         //  CLEANUP
         // ════════════════════════════════════════
 
@@ -533,6 +633,7 @@ namespace RoadTraffic
             // Nulluj _simConnect PRED despawnem — handlery pak bezpecne returnuji
             _simConnect = null;
             _trafficManager?.RemoveAllVehicles();
+            _trafficEngine?.RemoveAll();
         }
     }
 }
