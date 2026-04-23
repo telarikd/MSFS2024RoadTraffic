@@ -499,6 +499,21 @@ namespace RoadTraffic
         }
 
         // ════════════════════════════════════════
+        //  ROAD TYPE CHECKBOXY
+        // ════════════════════════════════════════
+
+        private void OnRoadTypeCheckboxChanged(object sender, RoutedEventArgs e)
+        {
+            var checkBox = sender as CheckBox;
+            if (checkBox == null || checkBox.Tag == null) return;
+
+            RoadType roadType;
+            if (!Enum.TryParse(checkBox.Tag.ToString(), out roadType)) return;
+
+            _trafficManager.SetRoadTypeEnabled(roadType, checkBox.IsChecked == true);
+        }
+
+        // ════════════════════════════════════════
         //  CLEANUP
         // ════════════════════════════════════════
 
