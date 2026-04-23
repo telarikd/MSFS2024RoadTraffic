@@ -18,7 +18,7 @@ namespace RoadTraffic
         // ── Konfigurace ──
         private const int    WM_USER_SIMCONNECT = 0x0402;
         private const string VEHICLE_TITLE      = "HAmphibiusFemale";
-        private const string FLARE_EFFECT_TITLE = "RoadTrafficLight";     // SimObject\RoadTrafficLight package
+        private const string FLARE_EFFECT_TITLE = "RoadTrafficLight";      // vlastni emissive dot SimObject
         private int _updateIntervalMs = 16;            // ~60 Hz default; meni se pres ComboBox
         private const int PLAYER_POLL_INTERVAL_MS = 1000;
 
@@ -261,11 +261,17 @@ namespace RoadTraffic
             }
         }
 
+        private int _spawnFailCount;
+
         private void OnRecvException(SimConnect sender, SIMCONNECT_RECV_EXCEPTION e)
         {
-            // Ticho pro CREATE_OBJECT_FAILED — bezne selhani pri spawnu
             if ((SIMCONNECT_EXCEPTION)e.dwException == SIMCONNECT_EXCEPTION.CREATE_OBJECT_FAILED)
-                return;
+            {
+                _spawnFailCount++;
+                Dispatcher.Invoke(() =>
+                    FlareCountText.Text = string.Format("Rendered flares: {0}  (fail: {1})",
+                        _trafficEngine?.ActiveCars ?? 0, _spawnFailCount));
+            }
         }
 
         private void OnRecvQuit(SimConnect sender, SIMCONNECT_RECV e)
