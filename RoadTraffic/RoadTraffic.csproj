@@ -91,6 +91,7 @@
     <Compile Include="BoundingBox.cs" />
     <Compile Include="GeoCoordinate.cs" />
     <Compile Include="IRoadProvider.cs" />
+    <Compile Include="ITrafficDensityCalculator.cs" />
     <Compile Include="OverpassRoadProvider.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

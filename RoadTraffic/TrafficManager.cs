@@ -15,7 +15,7 @@ namespace MSFSTraffic.Engine
     public class TrafficManager
     {
         private readonly IRoadProvider _roadProvider;
-        private readonly TrafficDensityCalculator _densityCalc;
+        private readonly ITrafficDensityCalculator _densityCalc;
         private readonly Random _rng;
 
         // ── Stav ──
@@ -80,10 +80,10 @@ namespace MSFSTraffic.Engine
         /// </summary>
         public event Action<TrafficVehicle> OnVehiclePositionUpdated;
 
-        public TrafficManager(IRoadProvider roadProvider)
+        public TrafficManager(IRoadProvider roadProvider, ITrafficDensityCalculator densityCalc)
         {
             _roadProvider = roadProvider;
-            _densityCalc = new TrafficDensityCalculator();
+            _densityCalc = densityCalc;
             _rng = new Random();
             _vehicles = new List<TrafficVehicle>();
             _activeRoads = new List<RoadSegment>();

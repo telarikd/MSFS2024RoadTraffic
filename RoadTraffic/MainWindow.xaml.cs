@@ -73,7 +73,8 @@ namespace RoadTraffic
             InitializeComponent();
 
             var roadProvider = new OverpassRoadProvider();
-            _trafficManager = new TrafficManager(roadProvider);
+            var densityCalculator = new TrafficDensityCalculator();
+            _trafficManager = new TrafficManager(roadProvider, densityCalculator);
             _trafficManager.VehicleTitle = VEHICLE_TITLE;
             _trafficManager.MaxVehicles = 30;
             _trafficManager.UserDensityMultiplier = 0.5;

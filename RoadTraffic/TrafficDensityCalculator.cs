@@ -7,7 +7,7 @@ namespace MSFSTraffic.Models
     /// Vypocitava idealni pocet vozidel na silnicnim segmentu
     /// na zaklade casu, dne a uzivatelske hustoty.
     /// </summary>
-    public class TrafficDensityCalculator
+    public class TrafficDensityCalculator : ITrafficDensityCalculator
     {
         private readonly Dictionary<RoadType, TrafficProfile> _profiles;
 
