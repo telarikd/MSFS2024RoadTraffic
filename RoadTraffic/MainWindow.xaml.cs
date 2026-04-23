@@ -36,9 +36,7 @@ namespace RoadTraffic
         private DateTime _lastUpdateTime;
 
         // ── Spawn tracking ──
-        private readonly Dictionary<uint, int> _pendingSpawns = new Dictionary<uint, int>();
-        private readonly Dictionary<uint, int> _simObjectToVehicle = new Dictionary<uint, int>();
-        private uint _nextRequestId = 100;
+        private readonly SimConnectVehicleBridge _vehicleBridge;
 
         // ── UI sync guard ──
         private bool _sliderSyncing;
@@ -54,7 +52,7 @@ namespace RoadTraffic
 
         // ── Enums pro SimConnect ──
         private enum Requests : uint { PlayerPosition = 1 }
-        private enum Definitions : uint { InitPosition = 1, PlayerPosition = 2 }
+        internal enum Definitions : uint { InitPosition = 1, PlayerPosition = 2 }
 
         [StructLayout(LayoutKind.Sequential)]
         private struct PlayerPositionData
@@ -75,13 +73,14 @@ namespace RoadTraffic
             var roadProvider = new OverpassRoadProvider();
             var densityCalculator = new TrafficDensityCalculator();
             _trafficManager = new TrafficManager(roadProvider, densityCalculator);
+            _vehicleBridge = new SimConnectVehicleBridge(_trafficManager);
             _trafficManager.VehicleTitle = VEHICLE_TITLE;
             _trafficManager.MaxVehicles = 30;
             _trafficManager.UserDensityMultiplier = 0.5;
 
-            _trafficManager.OnVehicleSpawnRequested  += OnEngineSpawnRequest;
-            _trafficManager.OnVehicleDespawnRequested += OnEngineDespawnRequest;
-            _trafficManager.OnVehiclePositionUpdated  += OnEnginePositionUpdate;
+            _trafficManager.OnVehicleSpawnRequested  += _vehicleBridge.HandleEngineSpawnRequest;
+            _trafficManager.OnVehicleDespawnRequested += _vehicleBridge.HandleEngineDespawnRequest;
+            _trafficManager.OnVehiclePositionUpdated  += _vehicleBridge.HandleEnginePositionUpdate;
 
             DensitySlider.ValueChanged      += OnDensitySliderChanged;
             DensityTextBox.LostFocus        += OnDensityTextBoxLostFocus;
@@ -176,6 +175,7 @@ namespace RoadTraffic
                 _simConnect.OnRecvAssignedObjectId  += OnRecvAssignedObjectId;
                 _simConnect.OnRecvException         += OnRecvException;
                 _simConnect.OnRecvQuit              += OnRecvQuit;
+                _vehicleBridge.SetSimConnect(_simConnect);
             }
             catch (Exception)
             {
@@ -232,16 +232,7 @@ namespace RoadTraffic
 
         private void OnRecvAssignedObjectId(SimConnect sender, SIMCONNECT_RECV_ASSIGNED_OBJECT_ID e)
         {
-            uint requestId  = e.dwRequestID;
-            uint simObjectId = e.dwObjectID;
-
-            if (_pendingSpawns.ContainsKey(requestId))
-            {
-                int vehicleId = _pendingSpawns[requestId];
-                _pendingSpawns.Remove(requestId);
-                _trafficManager.RegisterSimObjectId(vehicleId, simObjectId);
-                _simObjectToVehicle[simObjectId] = vehicleId;
-            }
+            _vehicleBridge.HandleAssignedObjectId(e.dwRequestID, e.dwObjectID);
         }
 
         private void OnRecvException(SimConnect sender, SIMCONNECT_RECV_EXCEPTION e)
@@ -265,79 +256,6 @@ namespace RoadTraffic
         // ════════════════════════════════════════
         //  TRAFFIC ENGINE ↔ SIMCONNECT BRIDGE
         // ════════════════════════════════════════
-
-        private void OnEngineSpawnRequest(TrafficVehicle vehicle)
-        {
-            if (_simConnect == null) return;
-            try
-            {
-                var current = vehicle.GetCurrentPosition();
-                var pos     = current.pos;
-                double heading = current.headingDeg;
-
-                var initPos = new SIMCONNECT_DATA_INITPOSITION
-                {
-                    Latitude  = pos.Latitude,
-                    Longitude = pos.Longitude,
-                    Altitude  = 0,
-                    Pitch     = 0,
-                    Bank      = 0,
-                    Heading   = heading,
-                    OnGround  = 1,
-                    Airspeed  = 0
-                };
-
-                uint requestId = _nextRequestId++;
-                _pendingSpawns[requestId] = vehicle.VehicleId;
-
-                _simConnect.AICreateSimulatedObject_EX1(
-                    vehicle.SimObjectTitle, "", initPos, (Requests)requestId);
-            }
-            catch { }
-        }
-
-        private void OnEngineDespawnRequest(TrafficVehicle vehicle)
-        {
-            if (vehicle.SimObjectId == 0 || !vehicle.IsSpawned) return;
-            try
-            {
-                uint reqId = _nextRequestId++;
-                _simConnect.AIRemoveObject(vehicle.SimObjectId, (Requests)reqId);
-                _simObjectToVehicle.Remove(vehicle.SimObjectId);
-            }
-            catch { }
-        }
-
-        private void OnEnginePositionUpdate(TrafficVehicle vehicle)
-        {
-            if (_simConnect == null) return;
-            if (vehicle.SimObjectId == 0 || !vehicle.IsSpawned) return;
-            try
-            {
-                var current = vehicle.GetCurrentPosition();
-                var pos     = current.pos;
-                double heading = current.headingDeg;
-
-                var simPos = new SIMCONNECT_DATA_INITPOSITION
-                {
-                    Latitude  = pos.Latitude,
-                    Longitude = pos.Longitude,
-                    Altitude  = 0,
-                    Pitch     = 0,
-                    Bank      = 0,
-                    Heading   = heading,
-                    OnGround  = 1,
-                    Airspeed  = 0
-                };
-
-                _simConnect.SetDataOnSimObject(
-                    Definitions.InitPosition,
-                    vehicle.SimObjectId,
-                    SIMCONNECT_DATA_SET_FLAG.DEFAULT,
-                    simPos);
-            }
-            catch { }
-        }
 
         // ════════════════════════════════════════
         //  UPDATE LOOP
@@ -478,8 +396,7 @@ namespace RoadTraffic
             if (_simConnect == null || !_playerPosReceived) return;
 
             // Full respawn: odeber vsechna vozidla, engine auto-respawnuje dle noveho maxima
-            _pendingSpawns.Clear();
-            _simObjectToVehicle.Clear();
+            _vehicleBridge.ClearTracking();
             _trafficManager?.RemoveAllVehicles();
         }
 
@@ -526,6 +443,8 @@ namespace RoadTraffic
             _playerPollTimer?.Stop();
             // Nulluj _simConnect PRED despawnem — handlery pak bezpecne returnuji
             _simConnect = null;
+            _vehicleBridge.ClearTracking();
+            _vehicleBridge.SetSimConnect(null);
             _trafficManager?.RemoveAllVehicles();
         }
     }
