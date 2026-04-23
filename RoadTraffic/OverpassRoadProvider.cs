@@ -15,7 +15,7 @@ namespace MSFSTraffic.Roads
     /// Stahuje silniční data z OpenStreetMap přes Overpass API.
     /// Vrací RoadSegment objekty připravené pro traffic engine.
     /// </summary>
-    public class OverpassRoadProvider
+    public class OverpassRoadProvider : IRoadProvider
     {
         // Veřejné Overpass API endpointy (fallback pokud hlavní nefunguje)
         private static readonly string[] OverpassEndpoints = new[]

@@ -1,6 +1,7 @@
 using Microsoft.FlightSimulator.SimConnect;
 using MSFSTraffic.Engine;
 using MSFSTraffic.Models;
+using MSFSTraffic.Roads;
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -71,7 +72,8 @@ namespace RoadTraffic
         {
             InitializeComponent();
 
-            _trafficManager = new TrafficManager();
+            var roadProvider = new OverpassRoadProvider();
+            _trafficManager = new TrafficManager(roadProvider);
             _trafficManager.VehicleTitle = VEHICLE_TITLE;
             _trafficManager.MaxVehicles = 30;
             _trafficManager.UserDensityMultiplier = 0.5;

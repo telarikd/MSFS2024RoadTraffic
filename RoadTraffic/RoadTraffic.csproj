@@ -90,6 +90,7 @@
     <!-- Model classes — jen root verze (Models\ slozka obsahuje stare kopie) -->
     <Compile Include="BoundingBox.cs" />
     <Compile Include="GeoCoordinate.cs" />
+    <Compile Include="IRoadProvider.cs" />
     <Compile Include="OverpassRoadProvider.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
