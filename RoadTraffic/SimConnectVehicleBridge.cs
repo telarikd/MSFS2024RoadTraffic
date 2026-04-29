@@ -13,11 +13,6 @@ namespace RoadTraffic
         private uint _nextRequestId = 100;
         private SimConnect _simConnect;
 
-        private enum Requests : uint
-        {
-            PlayerPosition = 1
-        }
-
         public SimConnectVehicleBridge(TrafficManager trafficManager)
         {
             _trafficManager = trafficManager;
@@ -70,7 +65,7 @@ namespace RoadTraffic
                 _pendingSpawns[requestId] = vehicle.VehicleId;
 
                 _simConnect.AICreateSimulatedObject_EX1(
-                    vehicle.SimObjectTitle, "", initPos, (Requests)requestId);
+                    vehicle.SimObjectTitle, "", initPos, (SimConnectRequests)requestId);
             }
             catch { }
         }
@@ -81,7 +76,7 @@ namespace RoadTraffic
             try
             {
                 uint reqId = _nextRequestId++;
-                _simConnect.AIRemoveObject(vehicle.SimObjectId, (Requests)reqId);
+                _simConnect.AIRemoveObject(vehicle.SimObjectId, (SimConnectRequests)reqId);
                 _simObjectToVehicle.Remove(vehicle.SimObjectId);
             }
             catch { }
@@ -110,7 +105,7 @@ namespace RoadTraffic
                 };
 
                 _simConnect.SetDataOnSimObject(
-                    MainWindow.Definitions.InitPosition,
+                    SimConnectDefinitions.InitPosition,
                     vehicle.SimObjectId,
                     SIMCONNECT_DATA_SET_FLAG.DEFAULT,
                     simPos);

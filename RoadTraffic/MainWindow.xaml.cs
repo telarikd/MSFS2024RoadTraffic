@@ -4,7 +4,6 @@ using MSFSTraffic.Models;
 using MSFSTraffic.Roads;
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -49,18 +48,6 @@ namespace RoadTraffic
 
         // ── MaxVehicles slider sync guard ──
         private bool _maxVehiclesSyncing;
-
-        // ── Enums pro SimConnect ──
-        private enum Requests : uint { PlayerPosition = 1 }
-        internal enum Definitions : uint { InitPosition = 1, PlayerPosition = 2 }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct PlayerPositionData
-        {
-            public double Latitude;
-            public double Longitude;
-            public double Altitude;
-        }
 
         // ════════════════════════════════════════
         //  KONSTRUKTOR
@@ -154,21 +141,21 @@ namespace RoadTraffic
 
                 // INIT POSITION (pro spawn + update pozice vozidel)
                 _simConnect.AddToDataDefinition(
-                    Definitions.InitPosition, "INITIAL POSITION", null,
+                    SimConnectDefinitions.InitPosition, "INITIAL POSITION", null,
                     SIMCONNECT_DATATYPE.INITPOSITION, 0, SimConnect.SIMCONNECT_UNUSED);
-                _simConnect.RegisterDataDefineStruct<SIMCONNECT_DATA_INITPOSITION>(Definitions.InitPosition);
+                _simConnect.RegisterDataDefineStruct<SIMCONNECT_DATA_INITPOSITION>(SimConnectDefinitions.InitPosition);
 
                 // PLAYER POSITION
                 _simConnect.AddToDataDefinition(
-                    Definitions.PlayerPosition, "PLANE LATITUDE", "degrees",
+                    SimConnectDefinitions.PlayerPosition, "PLANE LATITUDE", "degrees",
                     SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 _simConnect.AddToDataDefinition(
-                    Definitions.PlayerPosition, "PLANE LONGITUDE", "degrees",
+                    SimConnectDefinitions.PlayerPosition, "PLANE LONGITUDE", "degrees",
                     SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 _simConnect.AddToDataDefinition(
-                    Definitions.PlayerPosition, "PLANE ALTITUDE", "feet",
+                    SimConnectDefinitions.PlayerPosition, "PLANE ALTITUDE", "feet",
                     SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                _simConnect.RegisterDataDefineStruct<PlayerPositionData>(Definitions.PlayerPosition);
+                _simConnect.RegisterDataDefineStruct<PlayerPositionData>(SimConnectDefinitions.PlayerPosition);
 
                 _simConnect.OnRecvOpen              += OnSimConnectOpen;
                 _simConnect.OnRecvSimobjectData     += OnRecvSimobjectData;
@@ -207,8 +194,8 @@ namespace RoadTraffic
         private void RequestPlayerPosition()
         {
             _simConnect.RequestDataOnSimObject(
-                Requests.PlayerPosition,
-                Definitions.PlayerPosition,
+                SimConnectRequests.PlayerPosition,
+                SimConnectDefinitions.PlayerPosition,
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_PERIOD.ONCE,
                 SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
@@ -217,7 +204,7 @@ namespace RoadTraffic
 
         private void OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA e)
         {
-            if ((Definitions)e.dwDefineID != Definitions.PlayerPosition) return;
+            if ((SimConnectDefinitions)e.dwDefineID != SimConnectDefinitions.PlayerPosition) return;
 
             var pos = (PlayerPositionData)e.dwData[0];
             _playerPos = new GeoCoordinate(pos.Latitude, pos.Longitude, pos.Altitude);
