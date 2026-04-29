@@ -24,15 +24,13 @@ namespace RoadTraffic
         // ── SimConnect ──
         private SimConnect _simConnect;
         private DispatcherTimer _updateTimer;
-        private DispatcherTimer _playerPollTimer;
 
         // ── Traffic Engine ──
         private TrafficManager _trafficManager;
 
         // ── Hráčova pozice ──
-        private GeoCoordinate _playerPos;
-        private bool _playerPosReceived;
         private DateTime _lastUpdateTime;
+        private readonly PlayerPositionTracker _playerPositionTracker;
 
         // ── Spawn tracking ──
         private readonly SimConnectVehicleBridge _vehicleBridge;
@@ -61,6 +59,7 @@ namespace RoadTraffic
             var densityCalculator = new TrafficDensityCalculator();
             _trafficManager = new TrafficManager(roadProvider, densityCalculator);
             _vehicleBridge = new SimConnectVehicleBridge(_trafficManager);
+            _playerPositionTracker = new PlayerPositionTracker(PLAYER_POLL_INTERVAL_MS);
             _trafficManager.VehicleTitle = VEHICLE_TITLE;
             _trafficManager.MaxVehicles = 30;
             _trafficManager.UserDensityMultiplier = 0.5;
@@ -68,6 +67,7 @@ namespace RoadTraffic
             _trafficManager.OnVehicleSpawnRequested  += _vehicleBridge.HandleEngineSpawnRequest;
             _trafficManager.OnVehicleDespawnRequested += _vehicleBridge.HandleEngineDespawnRequest;
             _trafficManager.OnVehiclePositionUpdated  += _vehicleBridge.HandleEnginePositionUpdate;
+            _playerPositionTracker.OnFirstPositionReceived += OnFirstPlayerPositionReceived;
 
             DensitySlider.ValueChanged      += OnDensitySliderChanged;
             DensityTextBox.LostFocus        += OnDensityTextBoxLostFocus;
@@ -182,39 +182,18 @@ namespace RoadTraffic
                 StatusText.Text = "Connected";
             });
 
-            // Periodicky nacitej pozici hrace
-            _playerPollTimer = new DispatcherTimer();
-            _playerPollTimer.Interval = TimeSpan.FromMilliseconds(PLAYER_POLL_INTERVAL_MS);
-            _playerPollTimer.Tick += (_, __) => RequestPlayerPosition();
-            _playerPollTimer.Start();
-
-            RequestPlayerPosition();
-        }
-
-        private void RequestPlayerPosition()
-        {
-            _simConnect.RequestDataOnSimObject(
-                SimConnectRequests.PlayerPosition,
-                SimConnectDefinitions.PlayerPosition,
-                SimConnect.SIMCONNECT_OBJECT_ID_USER,
-                SIMCONNECT_PERIOD.ONCE,
-                SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
-                0, 0, 0);
+            _playerPositionTracker.Start(_simConnect);
         }
 
         private void OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA e)
         {
-            if ((SimConnectDefinitions)e.dwDefineID != SimConnectDefinitions.PlayerPosition) return;
+            _playerPositionTracker.HandleSimObjectData(e);
+        }
 
-            var pos = (PlayerPositionData)e.dwData[0];
-            _playerPos = new GeoCoordinate(pos.Latitude, pos.Longitude, pos.Altitude);
-
-            if (!_playerPosReceived)
-            {
-                _playerPosReceived = true;
-                _lastUpdateTime = DateTime.UtcNow;
-                StartUpdateLoop();
-            }
+        private void OnFirstPlayerPositionReceived()
+        {
+            _lastUpdateTime = DateTime.UtcNow;
+            StartUpdateLoop();
         }
 
         private void OnRecvAssignedObjectId(SimConnect sender, SIMCONNECT_RECV_ASSIGNED_OBJECT_ID e)
@@ -258,14 +237,14 @@ namespace RoadTraffic
 
         private void OnUpdateTick(object sender, EventArgs e)
         {
-            if (!_playerPosReceived) return;
+            if (!_playerPositionTracker.IsPositionReceived) return;
 
             var now = DateTime.UtcNow;
             double deltaTime = (now - _lastUpdateTime).TotalSeconds;
             _lastUpdateTime = now;
             deltaTime = Math.Min(deltaTime, 0.5);
 
-            _trafficManager.Update(_playerPos, deltaTime);
+            _trafficManager.Update(_playerPositionTracker.PlayerPosition, deltaTime);
 
             // UI refresh jen ~1× za sekundu (ne kazdy physics tick)
             if (++_uiRefreshCounter >= 60)
@@ -380,7 +359,7 @@ namespace RoadTraffic
         private void OnRespawnDebounce(object sender, EventArgs e)
         {
             _respawnDebounceTimer.Stop();
-            if (_simConnect == null || !_playerPosReceived) return;
+            if (_simConnect == null || !_playerPositionTracker.IsPositionReceived) return;
 
             // Full respawn: odeber vsechna vozidla, engine auto-respawnuje dle noveho maxima
             _vehicleBridge.ClearTracking();
@@ -427,7 +406,7 @@ namespace RoadTraffic
         private void Cleanup()
         {
             _updateTimer?.Stop();
-            _playerPollTimer?.Stop();
+            _playerPositionTracker.Stop();
             // Nulluj _simConnect PRED despawnem — handlery pak bezpecne returnuji
             _simConnect = null;
             _vehicleBridge.ClearTracking();
