@@ -28,6 +28,7 @@ namespace MSFSTraffic.Roads
         private readonly HttpClient _httpClient;
         private readonly Dictionary<string, List<RoadSegment>> _cache;
         private readonly double _tileSizeDeg;  // velikost cache tile ve stupních
+        private static readonly TimeSpan PartialLoadReturnBudget = TimeSpan.FromSeconds(12);
 
         /// <summary>Počet úspěšných API volání.</summary>
         public int ApiCallCount { get; private set; }
@@ -58,6 +59,9 @@ namespace MSFSTraffic.Roads
             var tileKeys = GetTileKeys(bbox);
             var result = new List<RoadSegment>();
             var tilesToFetch = new List<string>();
+            var loadStartedUtc = DateTime.UtcNow;
+            int fetchedTileCount = 0;
+            int failedTileCount = 0;
 
             // Zkontroluj cache
             foreach (var key in tileKeys)
@@ -76,6 +80,12 @@ namespace MSFSTraffic.Roads
             // Stáhni chybějící tiles
             foreach (var tileKey in tilesToFetch)
             {
+                if (result.Count > 0 && DateTime.UtcNow - loadStartedUtc >= PartialLoadReturnBudget)
+                {
+                    Console.WriteLine($"  [Overpass] Returning partial road load after {result.Count} segments; remaining tiles skipped for this refresh.");
+                    break;
+                }
+
                 try
                 {
                     var tileBbox = TileKeyToBbox(tileKey);
@@ -83,15 +93,24 @@ namespace MSFSTraffic.Roads
                     _cache[tileKey] = segments;
                     result.AddRange(segments);
                     ApiCallCount++;
+                    fetchedTileCount++;
 
                     Console.WriteLine($"  [Overpass] Tile {tileKey}: {segments.Count} road segments fetched.");
                 }
                 catch (Exception ex)
                 {
+                    failedTileCount++;
                     Console.WriteLine($"  [Overpass] ERROR fetching tile {tileKey}: {ex.Message}");
-                    _cache[tileKey] = new List<RoadSegment>(); // prázdný cache aby se neopakoval
                 }
             }
+
+            if (failedTileCount > 0)
+                Console.WriteLine($"  [Overpass] Partial tile load: {fetchedTileCount} fetched, {failedTileCount} failed, {result.Count} road segments available.");
+
+            if (tilesToFetch.Count > 0 && fetchedTileCount == 0 && failedTileCount == tilesToFetch.Count && result.Count == 0)
+                throw new Exception("All requested Overpass tiles failed.");
+
+            RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] GetRoadsAroundAsync exit returnedSegments={result.Count}");
 
             return result;
         }

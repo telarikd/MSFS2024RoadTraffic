@@ -103,6 +103,7 @@
     </Compile>
     <Compile Include="RoadSegment.cs" />
     <Compile Include="RoadType.cs" />
+    <Compile Include="RuntimeDiagnostics.cs" />
     <Compile Include="SimConnectTypes.cs" />
     <Compile Include="SimConnectVehicleBridge.cs" />
     <Compile Include="TrafficDensityCalculator.cs" />

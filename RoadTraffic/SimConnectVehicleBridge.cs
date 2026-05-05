@@ -9,6 +9,7 @@ namespace RoadTraffic
     {
         private readonly TrafficManager _trafficManager;
         private readonly Dictionary<uint, int> _pendingSpawns = new Dictionary<uint, int>();
+        private readonly Dictionary<uint, string> _pendingSpawnTitles = new Dictionary<uint, string>();
         private readonly Dictionary<uint, int> _simObjectToVehicle = new Dictionary<uint, int>();
         private uint _nextRequestId = 100;
         private SimConnect _simConnect;
@@ -26,6 +27,7 @@ namespace RoadTraffic
         public void ClearTracking()
         {
             _pendingSpawns.Clear();
+            _pendingSpawnTitles.Clear();
             _simObjectToVehicle.Clear();
         }
 
@@ -35,6 +37,8 @@ namespace RoadTraffic
             {
                 int vehicleId = _pendingSpawns[requestId];
                 _pendingSpawns.Remove(requestId);
+                _pendingSpawnTitles.Remove(requestId);
+                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn assigned request={requestId} vehicle={vehicleId} object={simObjectId}");
                 _trafficManager.RegisterSimObjectId(vehicleId, simObjectId);
                 _simObjectToVehicle[simObjectId] = vehicleId;
             }
@@ -42,7 +46,8 @@ namespace RoadTraffic
 
         public void HandleEngineSpawnRequest(TrafficVehicle vehicle)
         {
-            if (_simConnect == null) return;
+            var simConnect = _simConnect;
+            if (simConnect == null) return;
             try
             {
                 var current = vehicle.GetCurrentPosition();
@@ -63,20 +68,27 @@ namespace RoadTraffic
 
                 uint requestId = _nextRequestId++;
                 _pendingSpawns[requestId] = vehicle.VehicleId;
+                _pendingSpawnTitles[requestId] = vehicle.SimObjectTitle;
 
-                _simConnect.AICreateSimulatedObject_EX1(
+                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] SimConnect create request={requestId} vehicle={vehicle.VehicleId} title={vehicle.SimObjectTitle}");
+                simConnect.AICreateSimulatedObject_EX1(
                     vehicle.SimObjectTitle, "", initPos, (SimConnectRequests)requestId);
             }
-            catch { }
+            catch (System.Exception ex)
+            {
+                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] SimConnect create threw {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         public void HandleEngineDespawnRequest(TrafficVehicle vehicle)
         {
+            var simConnect = _simConnect;
+            if (simConnect == null) return;
             if (vehicle.SimObjectId == 0 || !vehicle.IsSpawned) return;
             try
             {
                 uint reqId = _nextRequestId++;
-                _simConnect.AIRemoveObject(vehicle.SimObjectId, (SimConnectRequests)reqId);
+                simConnect.AIRemoveObject(vehicle.SimObjectId, (SimConnectRequests)reqId);
                 _simObjectToVehicle.Remove(vehicle.SimObjectId);
             }
             catch { }
@@ -84,7 +96,8 @@ namespace RoadTraffic
 
         public void HandleEnginePositionUpdate(TrafficVehicle vehicle)
         {
-            if (_simConnect == null) return;
+            var simConnect = _simConnect;
+            if (simConnect == null) return;
             if (vehicle.SimObjectId == 0 || !vehicle.IsSpawned) return;
             try
             {
@@ -104,7 +117,7 @@ namespace RoadTraffic
                     Airspeed = 0
                 };
 
-                _simConnect.SetDataOnSimObject(
+                simConnect.SetDataOnSimObject(
                     SimConnectDefinitions.InitPosition,
                     vehicle.SimObjectId,
                     SIMCONNECT_DATA_SET_FLAG.DEFAULT,

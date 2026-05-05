@@ -67,7 +67,6 @@ namespace RoadTraffic
             _trafficManager.OnVehicleSpawnRequested  += _vehicleBridge.HandleEngineSpawnRequest;
             _trafficManager.OnVehicleDespawnRequested += _vehicleBridge.HandleEngineDespawnRequest;
             _trafficManager.OnVehiclePositionUpdated  += _vehicleBridge.HandleEnginePositionUpdate;
-            _playerPositionTracker.OnFirstPositionReceived += OnFirstPlayerPositionReceived;
 
             DensitySlider.ValueChanged      += OnDensitySliderChanged;
             DensityTextBox.LostFocus        += OnDensityTextBoxLostFocus;
@@ -187,24 +186,22 @@ namespace RoadTraffic
 
         private void OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA e)
         {
-            _playerPositionTracker.HandleSimObjectData(e);
-        }
-
-        private void OnFirstPlayerPositionReceived()
-        {
-            _lastUpdateTime = DateTime.UtcNow;
-            StartUpdateLoop();
+            if (_playerPositionTracker.HandleSimObjectData(e))
+                EnsureUpdateLoopStarted();
         }
 
         private void OnRecvAssignedObjectId(SimConnect sender, SIMCONNECT_RECV_ASSIGNED_OBJECT_ID e)
         {
+            RuntimeDiagnostics.Log($"[RoadTraffic.Diag] AssignedObjectId request={e.dwRequestID} object={e.dwObjectID}");
             _vehicleBridge.HandleAssignedObjectId(e.dwRequestID, e.dwObjectID);
         }
 
         private void OnRecvException(SimConnect sender, SIMCONNECT_RECV_EXCEPTION e)
         {
-            // Ticho pro CREATE_OBJECT_FAILED — bezne selhani pri spawnu
-            if ((SIMCONNECT_EXCEPTION)e.dwException == SIMCONNECT_EXCEPTION.CREATE_OBJECT_FAILED)
+            var exception = (SIMCONNECT_EXCEPTION)e.dwException;
+            RuntimeDiagnostics.Log($"[RoadTraffic.Diag] SimConnect exception={exception} send={e.dwSendID} index={e.dwIndex}");
+
+            if (exception == SIMCONNECT_EXCEPTION.CREATE_OBJECT_FAILED)
                 return;
         }
 
@@ -229,10 +226,23 @@ namespace RoadTraffic
 
         private void StartUpdateLoop()
         {
-            _updateTimer = new DispatcherTimer();
+            if (_updateTimer == null)
+            {
+                _updateTimer = new DispatcherTimer();
+                _updateTimer.Tick += OnUpdateTick;
+            }
+
+            if (_updateTimer.IsEnabled) return;
+
+            _lastUpdateTime = DateTime.UtcNow;
             _updateTimer.Interval = TimeSpan.FromMilliseconds(_updateIntervalMs);
-            _updateTimer.Tick += OnUpdateTick;
             _updateTimer.Start();
+        }
+
+        private void EnsureUpdateLoopStarted()
+        {
+            if (_playerPositionTracker.IsPositionReceived)
+                StartUpdateLoop();
         }
 
         private void OnUpdateTick(object sender, EventArgs e)
@@ -256,6 +266,7 @@ namespace RoadTraffic
                 double km    = _trafficManager.TotalRoadKm;
 
                 VehiclesText.Text = string.Format("Vehicles: {0}/{1}", vehicles, _trafficManager.MaxVehicles);
+                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] UI refresh roads={roads} vehicles={vehicles}");
 
                 if (roads > 0)
                 {
@@ -407,11 +418,13 @@ namespace RoadTraffic
         {
             _updateTimer?.Stop();
             _playerPositionTracker.Stop();
-            // Nulluj _simConnect PRED despawnem — handlery pak bezpecne returnuji
-            _simConnect = null;
+
+            // Despawnuj dokud bridge stale drzi platny SimConnect.
+            _trafficManager?.RemoveAllVehicles();
+
             _vehicleBridge.ClearTracking();
             _vehicleBridge.SetSimConnect(null);
-            _trafficManager?.RemoveAllVehicles();
+            _simConnect = null;
         }
     }
 }

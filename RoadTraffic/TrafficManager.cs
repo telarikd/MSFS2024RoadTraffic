@@ -170,9 +170,12 @@ namespace MSFSTraffic.Engine
             {
                 if (_pendingRoads != null)
                 {
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Applying pending roads count={_pendingRoads.Count}");
                     _activeRoads = _pendingRoads;
                     _pendingRoads = null;
                     BuildJunctionIndex(_activeRoads);
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Active roads applied count={_activeRoads.Count}");
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] ActiveRoadCount after apply={ActiveRoadCount}");
                 }
             }
 
@@ -214,23 +217,23 @@ namespace MSFSTraffic.Engine
             Console.WriteLine($"[TrafficManager] Loading roads around ({playerPos.Latitude:F4}, {playerPos.Longitude:F4})...");
 
             var loaded = await _roadProvider.GetRoadsAroundAsync(playerPos, RoadFetchRadiusM);
+            RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] TrafficManager provider returned count={loaded.Count}");
             _lastRoadFetchPosition = playerPos;
 
             // Bezpecny predani UI threadu — zadny primy zapis do _activeRoads z BG threadu
             lock (_pendingRoadsLock)
             {
                 _pendingRoads = loaded;
+                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Pending roads assigned count={_pendingRoads.Count}");
             }
 
-            var _activeRoads = loaded; // jen pro statistiky nize
-
             // Statistiky
-            int totalLength = (int)_activeRoads.Sum(r => r.LengthMeters);
-            var byType = _activeRoads.GroupBy(r => r.RoadType)
-                                     .Select(g => $"{g.Key}: {g.Count()}")
-                                     .ToArray();
+            int totalLength = (int)loaded.Sum(r => r.LengthMeters);
+            var byType = loaded.GroupBy(r => r.RoadType)
+                               .Select(g => $"{g.Key}: {g.Count()}")
+                               .ToArray();
 
-            Console.WriteLine($"[TrafficManager] Loaded {_activeRoads.Count} road segments " +
+            Console.WriteLine($"[TrafficManager] Loaded {loaded.Count} road segments " +
                               $"({totalLength / 1000.0:F1} km total)");
             Console.WriteLine($"  Types: {string.Join(", ", byType)}");
 
@@ -319,21 +322,51 @@ namespace MSFSTraffic.Engine
             if (_activeRoads.Count == 0) return;
             if (_vehicles.Count >= MaxVehicles) return;
 
+            bool logSpawnDiag = (_tickCount % 60) == 0;
+            int disabledTypeSkipCount = 0;
+            int distanceSkipCount = 0;
+            int densityZeroCount = 0;
+            int representativeLogCount = 0;
+            var candidateCountsByType = new Dictionary<RoadType, int>();
+
+            if (logSpawnDiag)
+            {
+                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn update activeRoads={_activeRoads.Count} enabledRoadTypes={string.Join(",", _enabledRoadTypes)}");
+            }
+
             // Collect kandidaty — motorway/trunk az 15 km (LOD.Light zona), ostatni do 5 km.
             // Filtruj zakazane typy. Serad od nejblizsi.
             var candidates = new List<KeyValuePair<double, RoadSegment>>();
             foreach (var road in _activeRoads)
             {
-                if (!_enabledRoadTypes.Contains(road.RoadType)) continue;
+                if (!_enabledRoadTypes.Contains(road.RoadType))
+                {
+                    disabledTypeSkipCount++;
+                    continue;
+                }
 
                 double d = road.DistanceToPoint(playerPos);
-                bool isHighway = road.RoadType == RoadType.Motorway || road.RoadType == RoadType.Trunk;
-                double maxDist = isHighway ? 15000 : 5000;
+                double maxDist = GetMaxSpawnDistM(road.RoadType);
 
                 if (d <= maxDist)
+                {
                     candidates.Add(new KeyValuePair<double, RoadSegment>(d, road));
+                    if (!candidateCountsByType.ContainsKey(road.RoadType))
+                        candidateCountsByType[road.RoadType] = 0;
+                    candidateCountsByType[road.RoadType]++;
+                }
+                else
+                {
+                    distanceSkipCount++;
+                }
             }
             candidates.Sort((a, b) => a.Key.CompareTo(b.Key));
+
+            if (logSpawnDiag)
+            {
+                string byType = string.Join(", ", candidateCountsByType.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn candidates count={candidates.Count} byType=[{byType}] skippedDisabledType={disabledTypeSkipCount} skippedDistanceThreshold={distanceSkipCount}");
+            }
 
             foreach (var kv in candidates)
             {
@@ -351,19 +384,39 @@ namespace MSFSTraffic.Engine
                 if (isLodLight)
                     idealCount = Math.Max(idealCount * 4, 6);
 
-                if (idealCount <= 0) continue;
+                if (idealCount <= 0)
+                {
+                    densityZeroCount++;
+                    if (logSpawnDiag && representativeLogCount < 8)
+                    {
+                        RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn candidate road={road.OsmId} type={road.RoadType} dist={roadDist:F0} ideal=0 skippedDensityResult0");
+                        representativeLogCount++;
+                    }
+                    continue;
+                }
 
                 int currentCount = _vehicles.Count(v => v.Segment.OsmId == road.OsmId);
                 int toSpawn = idealCount - currentCount;
 
+                if (logSpawnDiag && representativeLogCount < 8)
+                {
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn candidate road={road.OsmId} type={road.RoadType} dist={roadDist:F0} ideal={idealCount} current={currentCount} toSpawn={toSpawn}");
+                    representativeLogCount++;
+                }
+
                 for (int i = 0; i < toSpawn && _vehicles.Count < MaxVehicles; i++)
                 {
-                    SpawnVehicleOnRoad(road, playerPos);
+                    SpawnVehicleOnRoad(road, playerPos, logSpawnDiag);
                 }
+            }
+
+            if (logSpawnDiag)
+            {
+                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn densityZero count={densityZeroCount}");
             }
         }
 
-        private void SpawnVehicleOnRoad(RoadSegment road, GeoCoordinate playerPos)
+        private void SpawnVehicleOnRoad(RoadSegment road, GeoCoordinate playerPos, bool logSpawnDiag)
         {
             // Náhodná pozice na segmentu
             double distOnSegment = _rng.NextDouble() * road.LengthMeters;
@@ -398,12 +451,27 @@ namespace MSFSTraffic.Engine
             var (pos, _) = vehicle.GetCurrentPosition();
             double dist = playerPos.DistanceTo(pos);
 
-            if (dist < 50) return;                              // příliš blízko — pop-in
-            if (dist > GetMaxSpawnDistM(road.RoadType)) return; // per-type max radius
+            if (dist < 50)
+            {
+                if (logSpawnDiag)
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedMinDistance road={road.OsmId} type={road.RoadType} dist={dist:F0}");
+                return;
+            }
+            if (dist > GetMaxSpawnDistM(road.RoadType))
+            {
+                if (logSpawnDiag)
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedDistanceThreshold road={road.OsmId} type={road.RoadType} dist={dist:F0} max={GetMaxSpawnDistM(road.RoadType):F0}");
+                return;
+            }
 
             // LOD.Light zona (>5 km): povoleno jen pro motorway/trunk
             bool isHighway = road.RoadType == RoadType.Motorway || road.RoadType == RoadType.Trunk;
-            if (dist > 5000 && !isHighway) return;
+            if (dist > 5000 && !isHighway)
+            {
+                if (logSpawnDiag)
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedDistanceThreshold road={road.OsmId} type={road.RoadType} dist={dist:F0} lodLightNonHighway");
+                return;
+            }
 
             // Minimalni rozestup — nespawnuj vozidlo blizko jineho na stejnem segmentu
             const double MinSeparationM = 20.0;
@@ -414,9 +482,16 @@ namespace MSFSTraffic.Engine
                 var (exPos, _) = existing.GetCurrentPosition();
                 if (pos.DistanceTo(exPos) < MinSeparationM) { tooClose = true; break; }
             }
-            if (tooClose) return;
+            if (tooClose)
+            {
+                if (logSpawnDiag)
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedSpacingTooClose road={road.OsmId} type={road.RoadType} dist={dist:F0}");
+                return;
+            }
 
             _vehicles.Add(vehicle);
+            RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Vehicle created vehicle={vehicle.VehicleId} road={road.OsmId} type={road.RoadType} dist={dist:F0}");
+            RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] OnVehicleSpawnRequested raising vehicle={vehicle.VehicleId} road={road.OsmId}");
             OnVehicleSpawnRequested?.Invoke(vehicle);
         }
 
@@ -431,6 +506,11 @@ namespace MSFSTraffic.Engine
                 case RoadType.Motorway:
                 case RoadType.Trunk:   return 15000; // LOD.Light zona: světelné tečky 5–15 km
                 case RoadType.Primary: return 2500;
+                case RoadType.Secondary:
+                case RoadType.Tertiary:
+                case RoadType.Residential:
+                case RoadType.Unclassified:
+                    return 4000;
                 default:               return 2000;
             }
         }

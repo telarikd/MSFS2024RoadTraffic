@@ -13,8 +13,6 @@ namespace RoadTraffic
         private GeoCoordinate _playerPos;
         private bool _playerPosReceived;
 
-        public event Action OnFirstPositionReceived;
-
         public GeoCoordinate PlayerPosition
         {
             get { return _playerPos; }
@@ -49,18 +47,17 @@ namespace RoadTraffic
             _simConnect = null;
         }
 
-        public void HandleSimObjectData(SIMCONNECT_RECV_SIMOBJECT_DATA e)
+        public bool HandleSimObjectData(SIMCONNECT_RECV_SIMOBJECT_DATA e)
         {
-            if ((SimConnectDefinitions)e.dwDefineID != SimConnectDefinitions.PlayerPosition) return;
+            if ((SimConnectDefinitions)e.dwDefineID != SimConnectDefinitions.PlayerPosition)
+            {
+                return false;
+            }
 
             var pos = (PlayerPositionData)e.dwData[0];
             _playerPos = new GeoCoordinate(pos.Latitude, pos.Longitude, pos.Altitude);
-
-            if (!_playerPosReceived)
-            {
-                _playerPosReceived = true;
-                OnFirstPositionReceived?.Invoke();
-            }
+            _playerPosReceived = true;
+            return true;
         }
 
         private void RequestPlayerPosition()
