@@ -30,7 +30,9 @@ namespace RoadTraffic
 
         public void Start(SimConnect simConnect)
         {
+            _playerPollTimer?.Stop();
             _simConnect = simConnect;
+            _playerPosReceived = false;
 
             // Periodicky nacitej pozici hrace
             _playerPollTimer = new DispatcherTimer();
@@ -44,7 +46,9 @@ namespace RoadTraffic
         public void Stop()
         {
             _playerPollTimer?.Stop();
+            _playerPollTimer = null;
             _simConnect = null;
+            _playerPosReceived = false;
         }
 
         public bool HandleSimObjectData(SIMCONNECT_RECV_SIMOBJECT_DATA e)
@@ -62,13 +66,22 @@ namespace RoadTraffic
 
         private void RequestPlayerPosition()
         {
-            _simConnect.RequestDataOnSimObject(
-                SimConnectRequests.PlayerPosition,
-                SimConnectDefinitions.PlayerPosition,
-                SimConnect.SIMCONNECT_OBJECT_ID_USER,
-                SIMCONNECT_PERIOD.ONCE,
-                SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
-                0, 0, 0);
+            var simConnect = _simConnect;
+            if (simConnect == null) return;
+
+            try
+            {
+                simConnect.RequestDataOnSimObject(
+                    SimConnectRequests.PlayerPosition,
+                    SimConnectDefinitions.PlayerPosition,
+                    SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                    SIMCONNECT_PERIOD.ONCE,
+                    SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT,
+                    0, 0, 0);
+            }
+            catch
+            {
+            }
         }
     }
 }

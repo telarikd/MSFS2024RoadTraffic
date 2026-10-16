@@ -1,0 +1,20 @@
+{
+  "content": [
+    {
+      "path": "SimObjects\\GroundVehicles\\RoadTrafficCar\\model\\RoadTrafficCar.glb",
+      "size": 15864
+    },
+    {
+      "path": "SimObjects\\GroundVehicles\\RoadTrafficCar\\model\\model.cfg",
+      "size": 35
+    },
+    {
+      "path": "SimObjects\\GroundVehicles\\RoadTrafficCar\\sim.cfg",
+      "size": 475
+    },
+    {
+      "path": "manifest.json",
+      "size": 217
+    }
+  ]
+}

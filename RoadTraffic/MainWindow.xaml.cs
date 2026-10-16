@@ -17,7 +17,7 @@ namespace RoadTraffic
     {
         // ── Konfigurace ──
         private const int WM_USER_SIMCONNECT = 0x0402;
-        private const string VEHICLE_TITLE = "HAmphibiusFemale";
+        private const string VEHICLE_TITLE = "RoadTrafficCar";
         private int _updateIntervalMs = 16;            // ~60 Hz default; meni se pres ComboBox
         private const int PLAYER_POLL_INTERVAL_MS = 1000;
 
@@ -373,8 +373,8 @@ namespace RoadTraffic
             if (_simConnect == null || !_playerPositionTracker.IsPositionReceived) return;
 
             // Full respawn: odeber vsechna vozidla, engine auto-respawnuje dle noveho maxima
-            _vehicleBridge.ClearTracking();
             _trafficManager?.RemoveAllVehicles();
+            _vehicleBridge.ClearTracking();
         }
 
         // ════════════════════════════════════════
