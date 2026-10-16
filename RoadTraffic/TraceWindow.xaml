@@ -1,0 +1,18 @@
+<Window x:Class="RoadTraffic.TraceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RoadTraffic Live Trace"
+        Width="760" Height="360"
+        MinWidth="520" MinHeight="220"
+        Background="#1E1E2E" Foreground="White">
+    <Grid Margin="10">
+        <TextBox x:Name="TraceTextBox"
+                 IsReadOnly="True"
+                 TextWrapping="NoWrap"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Auto"
+                 FontFamily="Consolas" FontSize="11"
+                 Background="#151520" Foreground="#D8D8E8"
+                 BorderBrush="#555577"/>
+    </Grid>
+</Window>

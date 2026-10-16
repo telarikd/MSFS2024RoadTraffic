@@ -52,6 +52,50 @@ namespace MSFSTraffic.Models
             return minDist;
         }
 
+        /// <summary>
+        /// Vrati vzdalenost po segmentu od Nodes[0] k bodu nejblizsimu zadanemu bodu.
+        /// </summary>
+        public double GetNearestDistanceAlongSegment(GeoCoordinate point)
+        {
+            if (Nodes.Count < 2) return 0;
+
+            double nearestDistance = double.MaxValue;
+            double distanceAlongRoad = 0;
+            double nearestDistanceAlongRoad = 0;
+
+            for (int i = 0; i < Nodes.Count - 1; i++)
+            {
+                GeoCoordinate a = Nodes[i];
+                GeoCoordinate b = Nodes[i + 1];
+                double cosLat = Math.Cos(a.Latitude * Math.PI / 180.0);
+                const double metersPerDeg = 111_320.0;
+
+                double bx = (b.Longitude - a.Longitude) * metersPerDeg * cosLat;
+                double by = (b.Latitude - a.Latitude) * metersPerDeg;
+                double px = (point.Longitude - a.Longitude) * metersPerDeg * cosLat;
+                double py = (point.Latitude - a.Latitude) * metersPerDeg;
+                double lenSq = bx * bx + by * by;
+                double t = lenSq > 0 ? Math.Max(0, Math.Min(1, (px * bx + py * by) / lenSq)) : 0;
+
+                double closestX = t * bx;
+                double closestY = t * by;
+                double diffX = px - closestX;
+                double diffY = py - closestY;
+                double distance = Math.Sqrt(diffX * diffX + diffY * diffY);
+                double edgeLength = a.DistanceTo(b);
+
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestDistanceAlongRoad = distanceAlongRoad + edgeLength * t;
+                }
+
+                distanceAlongRoad += edgeLength;
+            }
+
+            return nearestDistanceAlongRoad;
+        }
+
         // ── Private helpers ──
 
         private static double ComputeLength(List<GeoCoordinate> nodes)

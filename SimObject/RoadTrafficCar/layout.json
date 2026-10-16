@@ -6,11 +6,15 @@
     },
     {
       "path": "SimObjects\\GroundVehicles\\RoadTrafficCar\\model\\model.cfg",
-      "size": 35
+      "size": 39
+    },
+    {
+      "path": "SimObjects\\GroundVehicles\\RoadTrafficCar\\model\\RoadTrafficCar.xml",
+      "size": 147
     },
     {
       "path": "SimObjects\\GroundVehicles\\RoadTrafficCar\\sim.cfg",
-      "size": 475
+      "size": 555
     },
     {
       "path": "manifest.json",

@@ -158,14 +158,12 @@ namespace MSFSTraffic.Models
         /// <summary>
         /// Aktualizuje LOD podle vzdalenosti od hrace. Vraci novy LOD.
         /// </summary>
-        public VehicleLOD DetermineLOD(double distFromPlayer)
+        public VehicleLOD DetermineLOD(double distFromPlayer, double despawnRadiusM)
         {
             PreviousLOD = CurrentLOD;
 
-            if (distFromPlayer > 15000)
+            if (distFromPlayer > despawnRadiusM)
                 CurrentLOD = VehicleLOD.None;
-            else if (distFromPlayer > 5000)
-                CurrentLOD = VehicleLOD.Light;   // světelné tečky 5–15 km (motorway/trunk)
             else
                 CurrentLOD = VehicleLOD.Full;
 

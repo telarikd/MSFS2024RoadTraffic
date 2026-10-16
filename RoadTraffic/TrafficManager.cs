@@ -48,6 +48,12 @@ namespace MSFSTraffic.Engine
         /// <summary>Minimální vzdálenost přesunu hráče pro nové načtení silnic (metry).</summary>
         public double RoadRefetchThresholdM { get; set; } = 2000;
 
+        /// <summary>Vnitřní poloměr, ve kterém se vytváří plná SimConnect vozidla.</summary>
+        public double SpawnRadiusM { get; set; } = 3000;
+
+        /// <summary>Vnější poloměr, za kterým se vozidla odstraní.</summary>
+        public double DespawnRadiusM { get; set; } = 3000;
+
         /// <summary>Maximální počet vozidel najednou.</summary>
         public int MaxVehicles { get; set; } = 50;
 
@@ -215,9 +221,17 @@ namespace MSFSTraffic.Engine
             if (!ShouldRefetchRoads(playerPos)) return;
 
             Console.WriteLine($"[TrafficManager] Loading roads around ({playerPos.Latitude:F4}, {playerPos.Longitude:F4})...");
+            RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Road refresh center=({playerPos.Latitude:F6},{playerPos.Longitude:F6}) radius={RoadFetchRadiusM:F0}");
 
             var loaded = await _roadProvider.GetRoadsAroundAsync(playerPos, RoadFetchRadiusM);
             RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] TrafficManager provider returned count={loaded.Count}");
+
+            if (loaded.Count == 0)
+            {
+                RoadTraffic.RuntimeDiagnostics.Log("[RoadTraffic.Diag] TrafficManager retained active roads because provider returned no segments.");
+                return;
+            }
+
             _lastRoadFetchPosition = playerPos;
 
             // Bezpecny predani UI threadu — zadny primy zapis do _activeRoads z BG threadu
@@ -232,6 +246,8 @@ namespace MSFSTraffic.Engine
             var byType = loaded.GroupBy(r => r.RoadType)
                                .Select(g => $"{g.Key}: {g.Count()}")
                                .ToArray();
+
+            RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Loaded road types=[{string.Join(", ", byType)}]");
 
             Console.WriteLine($"[TrafficManager] Loaded {loaded.Count} road segments " +
                               $"({totalLength / 1000.0:F1} km total)");
@@ -279,8 +295,14 @@ namespace MSFSTraffic.Engine
                 var (pos, heading) = vehicle.GetCurrentPosition();
                 double dist = playerPos.DistanceTo(pos);
 
-                // LOD update
-                var newLod = vehicle.DetermineLOD(dist);
+                if (dist > DespawnRadiusM)
+                {
+                    toRemove.Add(vehicle);
+                    continue;
+                }
+
+                // V ramci despawn bubliny zustavaji vsechna vozidla plne SimConnect objekty.
+                var newLod = vehicle.DetermineLOD(dist, DespawnRadiusM);
 
                 if (newLod == VehicleLOD.None)
                 {
@@ -320,13 +342,21 @@ namespace MSFSTraffic.Engine
         private void SpawnVehiclesOnRoads(GeoCoordinate playerPos)
         {
             if (_activeRoads.Count == 0) return;
-            if (_vehicles.Count >= MaxVehicles) return;
+
+            // MaxVehicles remains the user cap. Full SimConnect objects also have a local
+            // resource budget so a high UI cap cannot overload MSFS inside the traffic bubble.
+            const int MaxLocalFullVehicles = 80;
+            int targetVehicleCount = Math.Min(
+                Math.Min(MaxVehicles, MaxLocalFullVehicles),
+                (int)Math.Round(MaxVehicles * UserDensityMultiplier));
+            if (_vehicles.Count >= targetVehicleCount) return;
 
             bool logSpawnDiag = (_tickCount % 60) == 0;
             int disabledTypeSkipCount = 0;
             int distanceSkipCount = 0;
             int densityZeroCount = 0;
             int representativeLogCount = 0;
+            double nearestEnabledRoadDistance = double.MaxValue;
             var candidateCountsByType = new Dictionary<RoadType, int>();
 
             if (logSpawnDiag)
@@ -334,8 +364,7 @@ namespace MSFSTraffic.Engine
                 RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn update activeRoads={_activeRoads.Count} enabledRoadTypes={string.Join(",", _enabledRoadTypes)}");
             }
 
-            // Collect kandidaty — motorway/trunk az 15 km (LOD.Light zona), ostatni do 5 km.
-            // Filtruj zakazane typy. Serad od nejblizsi.
+            // Kandidati musi protinat lokalni spawn bublinu. Serad je od nejblizsiho.
             var candidates = new List<KeyValuePair<double, RoadSegment>>();
             foreach (var road in _activeRoads)
             {
@@ -346,9 +375,10 @@ namespace MSFSTraffic.Engine
                 }
 
                 double d = road.DistanceToPoint(playerPos);
-                double maxDist = GetMaxSpawnDistM(road.RoadType);
+                if (d < nearestEnabledRoadDistance)
+                    nearestEnabledRoadDistance = d;
 
-                if (d <= maxDist)
+                if (d <= SpawnRadiusM)
                 {
                     candidates.Add(new KeyValuePair<double, RoadSegment>(d, road));
                     if (!candidateCountsByType.ContainsKey(road.RoadType))
@@ -365,24 +395,18 @@ namespace MSFSTraffic.Engine
             if (logSpawnDiag)
             {
                 string byType = string.Join(", ", candidateCountsByType.OrderBy(kvp => kvp.Key).Select(kvp => $"{kvp.Key}:{kvp.Value}"));
-                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn candidates count={candidates.Count} byType=[{byType}] skippedDisabledType={disabledTypeSkipCount} skippedDistanceThreshold={distanceSkipCount}");
+                string nearestEnabled = nearestEnabledRoadDistance == double.MaxValue ? "none" : nearestEnabledRoadDistance.ToString("F0");
+                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn candidates count={candidates.Count} byType=[{byType}] nearestEnabledRoad={nearestEnabled} spawnRadius={SpawnRadiusM:F0} skippedDisabledType={disabledTypeSkipCount} skippedDistanceThreshold={distanceSkipCount}");
             }
 
             foreach (var kv in candidates)
             {
-                if (_vehicles.Count >= MaxVehicles) break;
+                if (_vehicles.Count >= targetVehicleCount) break;
 
                 var road = kv.Value;
                 double roadDist = kv.Key;
 
                 int idealCount = _densityCalc.CalculateVehicleCount(road, SimTimeHours, IsWeekend);
-
-                // LOD.Light zona (5–15 km): 4× density boost pro motorway/trunk —
-                // vytvori vizualni efekt hustého provozu viditelného jako světelné tečky
-                bool isLodLight = roadDist > 5000 &&
-                                  (road.RoadType == RoadType.Motorway || road.RoadType == RoadType.Trunk);
-                if (isLodLight)
-                    idealCount = Math.Max(idealCount * 4, 6);
 
                 if (idealCount <= 0)
                 {
@@ -404,7 +428,7 @@ namespace MSFSTraffic.Engine
                     representativeLogCount++;
                 }
 
-                for (int i = 0; i < toSpawn && _vehicles.Count < MaxVehicles; i++)
+                for (int i = 0; i < toSpawn && _vehicles.Count < targetVehicleCount; i++)
                 {
                     SpawnVehicleOnRoad(road, playerPos, logSpawnDiag);
                 }
@@ -413,13 +437,32 @@ namespace MSFSTraffic.Engine
             if (logSpawnDiag)
             {
                 RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn densityZero count={densityZeroCount}");
+                RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn target vehicles={targetVehicleCount} active={_vehicles.Count}");
             }
         }
 
         private void SpawnVehicleOnRoad(RoadSegment road, GeoCoordinate playerPos, bool logSpawnDiag)
         {
-            // Náhodná pozice na segmentu
-            double distOnSegment = _rng.NextDouble() * road.LengthMeters;
+            // Vyber nahodnou pozici jen z casti silnice, ktera lezi uvnitr spawn bubliny.
+            // Kandidat mohl bublinu pouze liznout; nahodny bod po cele delce by pak byl daleko.
+            double nearestRoadDistance = road.DistanceToPoint(playerPos);
+            double nearestDistanceAlongRoad = road.GetNearestDistanceAlongSegment(playerPos);
+            double allowedOffsetAlongRoad = Math.Max(0, SpawnRadiusM - nearestRoadDistance);
+            double minDistOnSegment = Math.Max(0, nearestDistanceAlongRoad - allowedOffsetAlongRoad);
+            double maxDistOnSegment = Math.Min(road.LengthMeters, nearestDistanceAlongRoad + allowedOffsetAlongRoad);
+
+            if (maxDistOnSegment <= minDistOnSegment)
+                return;
+
+            // Bias toward the nearest point on the road so traffic starts below the player
+            // and fans out to the edge of the local bubble instead of clustering at its edge.
+            double offsetBefore = nearestDistanceAlongRoad - minDistOnSegment;
+            double offsetAfter = maxDistOnSegment - nearestDistanceAlongRoad;
+            bool spawnAfterNearestPoint = _rng.NextDouble() < offsetAfter / (offsetBefore + offsetAfter);
+            double signedOffset = (spawnAfterNearestPoint ? 1 : -1)
+                                * (spawnAfterNearestPoint ? offsetAfter : offsetBefore)
+                                * Math.Pow(_rng.NextDouble(), 2);
+            double distOnSegment = nearestDistanceAlongRoad + signedOffset;
 
             // Směr — pokud jednosměrka, jen Forward; jinak náhodně
             TravelDirection direction;
@@ -457,19 +500,10 @@ namespace MSFSTraffic.Engine
                     RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedMinDistance road={road.OsmId} type={road.RoadType} dist={dist:F0}");
                 return;
             }
-            if (dist > GetMaxSpawnDistM(road.RoadType))
+            if (dist > SpawnRadiusM)
             {
                 if (logSpawnDiag)
-                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedDistanceThreshold road={road.OsmId} type={road.RoadType} dist={dist:F0} max={GetMaxSpawnDistM(road.RoadType):F0}");
-                return;
-            }
-
-            // LOD.Light zona (>5 km): povoleno jen pro motorway/trunk
-            bool isHighway = road.RoadType == RoadType.Motorway || road.RoadType == RoadType.Trunk;
-            if (dist > 5000 && !isHighway)
-            {
-                if (logSpawnDiag)
-                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedDistanceThreshold road={road.OsmId} type={road.RoadType} dist={dist:F0} lodLightNonHighway");
+                    RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Spawn attempt skippedDistanceThreshold road={road.OsmId} type={road.RoadType} dist={dist:F0} max={SpawnRadiusM:F0}");
                 return;
             }
 
@@ -493,26 +527,6 @@ namespace MSFSTraffic.Engine
             RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Vehicle created vehicle={vehicle.VehicleId} road={road.OsmId} type={road.RoadType} dist={dist:F0}");
             RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] OnVehicleSpawnRequested raising vehicle={vehicle.VehicleId} road={road.OsmId}");
             OnVehicleSpawnRequested?.Invoke(vehicle);
-        }
-
-        /// <summary>
-        /// Maximalni vzdalenost spawnu od hrace per road type (metry).
-        /// Motorway/Trunk jsou casto 3-5 km od letiste, last resort.
-        /// </summary>
-        private static double GetMaxSpawnDistM(RoadType type)
-        {
-            switch (type)
-            {
-                case RoadType.Motorway:
-                case RoadType.Trunk:   return 15000; // LOD.Light zona: světelné tečky 5–15 km
-                case RoadType.Primary: return 2500;
-                case RoadType.Secondary:
-                case RoadType.Tertiary:
-                case RoadType.Residential:
-                case RoadType.Unclassified:
-                    return 4000;
-                default:               return 2000;
-            }
         }
 
         /// <summary>

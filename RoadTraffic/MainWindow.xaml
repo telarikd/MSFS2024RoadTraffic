@@ -112,10 +112,10 @@
             <!-- Radek 2: Statistiky spawn/despawn -->
             <StackPanel Grid.Row="2" Margin="0,0,0,4">
                 <TextBlock x:Name="SpawnRangeText"
-                           Text="Spawn:    50 m – 5 000 m  |  highway 15 km"
+        Text="Spawn:    50 m – 3 000 m  |  local traffic bubble"
                            Foreground="#888899" FontSize="10"/>
                 <TextBlock x:Name="DespawnRangeText"
-                           Text="Despawn: 15 000 m  |  LOD.Light 5–15 km"
+        Text="Despawn: 3 000 m  |  max 80 full vehicles"
                            Foreground="#888899" FontSize="10"/>
             </StackPanel>
 
@@ -143,6 +143,10 @@
 
             <!-- Radek 4: Update Rate dropdown -->
             <StackPanel Grid.Row="4" VerticalAlignment="Bottom">
+                <Button x:Name="TraceButton" Content="Live Trace"
+                        Height="24" Margin="0,0,0,8"
+                        Background="#2D2D44" Foreground="White" BorderBrush="#555577"
+                        FontSize="11"/>
                 <TextBlock Text="Update Rate" Foreground="#CCCCDD"
                            FontSize="12" Margin="0,0,0,4"/>
                 <ComboBox x:Name="TickrateComboBox"

@@ -70,7 +70,7 @@ namespace RoadTraffic
                 _pendingSpawns[requestId] = vehicle.VehicleId;
                 _pendingSpawnTitles[requestId] = vehicle.SimObjectTitle;
 
-                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] SimConnect create request={requestId} vehicle={vehicle.VehicleId} title={vehicle.SimObjectTitle}");
+                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] SimConnect create request={requestId} vehicle={vehicle.VehicleId} title={vehicle.SimObjectTitle} lat={pos.Latitude:F6} lon={pos.Longitude:F6} altitudeFt={initPos.Altitude:F0} onGround={initPos.OnGround}");
                 simConnect.AICreateSimulatedObject_EX1(
                     vehicle.SimObjectTitle, "", initPos, (SimConnectRequests)requestId);
             }

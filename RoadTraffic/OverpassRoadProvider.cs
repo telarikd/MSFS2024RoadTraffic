@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Net.Http;
+using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 // Pokud nemáš Newtonsoft, můžeš přejít na System.Text.Json — viz komentář dole
 // using System.Text.Json;
@@ -20,8 +22,8 @@ namespace MSFSTraffic.Roads
         // Veřejné Overpass API endpointy (fallback pokud hlavní nefunguje)
         private static readonly string[] OverpassEndpoints = new[]
         {
+            "https://overpass.private.coffee/api/interpreter",
             "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-            "https://overpass.kumi.systems/api/interpreter",
             "https://overpass-api.de/api/interpreter"
         };
 
@@ -38,6 +40,7 @@ namespace MSFSTraffic.Roads
 
         public OverpassRoadProvider(double tileSizeDeg = 0.05)
         {
+            ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             _httpClient = new HttpClient();
             _httpClient.Timeout = TimeSpan.FromSeconds(8);
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "MSFSTrafficEngine/1.0");
@@ -56,13 +59,24 @@ namespace MSFSTraffic.Roads
         public async Task<List<RoadSegment>> GetRoadsAroundAsync(GeoCoordinate center, double radiusMeters = 5000)
         {
             var bbox = BoundingBox.FromCenter(center, radiusMeters);
-            var tileKeys = GetTileKeys(bbox);
+            // Pri casove omezenem partial loadu musi jit nejdriv tiles kolem hrace.
+            // Poradi podle rohu bboxu by jinak vratilo silnice z okraje oblasti.
+            var tileKeys = GetTileKeys(bbox)
+                .OrderBy(key =>
+                {
+                    var tile = TileKeyToBbox(key);
+                    var tileCenter = new GeoCoordinate(
+                        (tile.MinLat + tile.MaxLat) / 2,
+                        (tile.MinLon + tile.MaxLon) / 2);
+                    return center.DistanceTo(tileCenter);
+                })
+                .ToList();
             var result = new List<RoadSegment>();
             var tilesToFetch = new List<string>();
-            var loadStartedUtc = DateTime.UtcNow;
             int fetchedTileCount = 0;
             int failedTileCount = 0;
-
+            using (var loadBudgetCancellation = new CancellationTokenSource(PartialLoadReturnBudget))
+            {
             // Zkontroluj cache
             foreach (var key in tileKeys)
             {
@@ -78,29 +92,36 @@ namespace MSFSTraffic.Roads
             }
 
             // Stáhni chybějící tiles
-            foreach (var tileKey in tilesToFetch)
-            {
-                if (result.Count > 0 && DateTime.UtcNow - loadStartedUtc >= PartialLoadReturnBudget)
+                foreach (var tileKey in tilesToFetch)
                 {
-                    Console.WriteLine($"  [Overpass] Returning partial road load after {result.Count} segments; remaining tiles skipped for this refresh.");
-                    break;
-                }
+                    if (loadBudgetCancellation.IsCancellationRequested)
+                    {
+                        Console.WriteLine($"  [Overpass] Returning partial road load after {result.Count} segments; remaining tiles skipped for this refresh.");
+                        break;
+                    }
 
-                try
-                {
-                    var tileBbox = TileKeyToBbox(tileKey);
-                    var segments = await FetchRoadsFromOverpassAsync(tileBbox);
-                    _cache[tileKey] = segments;
-                    result.AddRange(segments);
-                    ApiCallCount++;
-                    fetchedTileCount++;
+                    try
+                    {
+                        var tileBbox = TileKeyToBbox(tileKey);
+                        var segments = await FetchRoadsFromOverpassAsync(tileBbox, loadBudgetCancellation.Token);
+                        _cache[tileKey] = segments;
+                        result.AddRange(segments);
+                        ApiCallCount++;
+                        fetchedTileCount++;
 
-                    Console.WriteLine($"  [Overpass] Tile {tileKey}: {segments.Count} road segments fetched.");
-                }
-                catch (Exception ex)
-                {
-                    failedTileCount++;
-                    Console.WriteLine($"  [Overpass] ERROR fetching tile {tileKey}: {ex.Message}");
+                        Console.WriteLine($"  [Overpass] Tile {tileKey}: {segments.Count} road segments fetched.");
+                    }
+                    catch (OperationCanceledException) when (loadBudgetCancellation.IsCancellationRequested)
+                    {
+                        Console.WriteLine($"  [Overpass] Returning partial road load after {result.Count} segments; time budget reached.");
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        failedTileCount++;
+                        Console.WriteLine($"  [Overpass] ERROR fetching tile {tileKey}: {ex.Message}");
+                        RoadTraffic.RuntimeDiagnostics.Log($"[RoadTraffic.Diag] Overpass tile failed tile={tileKey} error={ex.GetType().Name}: {ex.Message}");
+                    }
                 }
             }
 
@@ -118,7 +139,7 @@ namespace MSFSTraffic.Roads
         /// <summary>
         /// Stáhne silnice z Overpass API pro daný bounding box.
         /// </summary>
-        private async Task<List<RoadSegment>> FetchRoadsFromOverpassAsync(BoundingBox bbox)
+        private async Task<List<RoadSegment>> FetchRoadsFromOverpassAsync(BoundingBox bbox, CancellationToken cancellationToken)
         {
             string bboxStr = string.Format(CultureInfo.InvariantCulture,
                 "{0:F6},{1:F6},{2:F6},{3:F6}",
@@ -144,11 +165,15 @@ namespace MSFSTraffic.Roads
                         System.Text.Encoding.UTF8,
                         "application/x-www-form-urlencoded");
 
-                    var response = await _httpClient.PostAsync(endpoint, content);
+                    var response = await _httpClient.PostAsync(endpoint, content, cancellationToken);
                     response.EnsureSuccessStatusCode();
 
                     string json = await response.Content.ReadAsStringAsync();
                     return ParseOverpassResponse(json);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {

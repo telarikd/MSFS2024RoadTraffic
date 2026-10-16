@@ -8,10 +8,13 @@ namespace RoadTraffic
     {
         private static readonly object Sync = new object();
 
+        public static event Action<string> LineWritten;
+
         public static void Log(string message)
         {
             string line = DateTime.UtcNow.ToString("O") + " " + message;
             Debug.WriteLine(line);
+            LineWritten?.Invoke(line);
 
             try
             {

@@ -24,6 +24,8 @@ namespace RoadTraffic
         // ── SimConnect ──
         private SimConnect _simConnect;
         private DispatcherTimer _updateTimer;
+        private DispatcherTimer _connectRetryTimer;
+        private IntPtr _simConnectWindowHandle;
 
         // ── Traffic Engine ──
         private TrafficManager _trafficManager;
@@ -46,6 +48,8 @@ namespace RoadTraffic
 
         // ── MaxVehicles slider sync guard ──
         private bool _maxVehiclesSyncing;
+
+        private TraceWindow _traceWindow;
 
         // ════════════════════════════════════════
         //  KONSTRUKTOR
@@ -79,6 +83,7 @@ namespace RoadTraffic
 
             // Tickrate ComboBox
             TickrateComboBox.SelectionChanged += OnTickrateChanged;
+            TraceButton.Click += OnTraceButtonClick;
 
             // Road type checkboxy — Checked i Unchecked → stejny handler
             ChkMotorway.Checked      += OnRoadTypeCheckboxChanged;
@@ -100,6 +105,22 @@ namespace RoadTraffic
             _respawnDebounceTimer = new DispatcherTimer();
             _respawnDebounceTimer.Interval = TimeSpan.FromMilliseconds(800);
             _respawnDebounceTimer.Tick += OnRespawnDebounce;
+
+            _connectRetryTimer = new DispatcherTimer();
+            _connectRetryTimer.Interval = TimeSpan.FromSeconds(2);
+            _connectRetryTimer.Tick += OnConnectRetry;
+        }
+
+        private void OnTraceButtonClick(object sender, RoutedEventArgs e)
+        {
+            if (_traceWindow == null || !_traceWindow.IsLoaded)
+            {
+                _traceWindow = new TraceWindow { Owner = this };
+                _traceWindow.Closed += (s, args) => _traceWindow = null;
+                _traceWindow.Show();
+            }
+
+            _traceWindow.Activate();
         }
 
         // ════════════════════════════════════════
@@ -111,11 +132,13 @@ namespace RoadTraffic
             base.OnSourceInitialized(e);
             var helper = new WindowInteropHelper(this);
             HwndSource.FromHwnd(helper.Handle).AddHook(WndProc);
-            TryConnect(helper.Handle);
+            _simConnectWindowHandle = helper.Handle;
+            TryConnect(_simConnectWindowHandle);
         }
 
         protected override void OnClosed(EventArgs e)
         {
+            _connectRetryTimer?.Stop();
             Cleanup();
             base.OnClosed(e);
         }
@@ -134,6 +157,8 @@ namespace RoadTraffic
 
         private void TryConnect(IntPtr handle)
         {
+            if (_simConnect != null) return;
+
             try
             {
                 _simConnect = new SimConnect("RoadTrafficEngine", handle, WM_USER_SIMCONNECT, null, 0);
@@ -162,11 +187,20 @@ namespace RoadTraffic
                 _simConnect.OnRecvException         += OnRecvException;
                 _simConnect.OnRecvQuit              += OnRecvQuit;
                 _vehicleBridge.SetSimConnect(_simConnect);
+                _connectRetryTimer.Stop();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // MSFS nespusten — zustaneme v Disconnected stavu
+                _simConnect = null;
+                _vehicleBridge.SetSimConnect(null);
+                RuntimeDiagnostics.Log($"[RoadTraffic.Diag] SimConnect connect failed: {ex.GetType().Name}: {ex.Message}");
+                _connectRetryTimer.Start();
             }
+        }
+
+        private void OnConnectRetry(object sender, EventArgs e)
+        {
+            TryConnect(_simConnectWindowHandle);
         }
 
         // ════════════════════════════════════════
@@ -214,6 +248,7 @@ namespace RoadTraffic
                 VehiclesText.Text = string.Format("Vehicles: 0/{0}", _trafficManager.MaxVehicles);
             });
             Cleanup();
+            _connectRetryTimer.Start();
         }
 
         // ════════════════════════════════════════
